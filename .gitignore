@@ -1,0 +1,6 @@
+# Reports describe your own disk (folder and file names): keep them out of git
+reports/
+*.json
+
+__pycache__/
+*.pyc

@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__REPORT_TITLE__</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f3f2ee; --hover: #f0efec;
+  --border: rgba(11, 11, 11, 0.10); --border-strong: rgba(11, 11, 11, 0.16);
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781; --track: #e1e0d9;
+  --c-user: #2a78d6; --c-apps: #eb6834; --c-cache: #1baf7a; --c-dev: #eda100; --c-system: #e87ba4; --c-other: #898781;
+  --on-user: #fff; --on-apps: #fff; --on-cache: #fff; --on-dev: #0b0b0b; --on-system: #fff; --on-other: #fff;
+  --good: #0ca30c; --warning: #fab219; --good-ink: #006300;
+  --code: #efeee9; --focus: #2a78d6; --link: #256abf;
+  --shadow: 0 1px 2px rgba(11, 11, 11, 0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #222220; --hover: #242422;
+    --border: rgba(255, 255, 255, 0.10); --border-strong: rgba(255, 255, 255, 0.16);
+    --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781; --track: #2c2c2a;
+    --c-user: #3987e5; --c-apps: #d95926; --c-cache: #199e70; --c-dev: #c98500; --c-system: #d55181; --c-other: #6f6e69;
+    --on-dev: #fff;
+    --good-ink: #0ca30c; --code: #262624; --focus: #6da7ec; --link: #6da7ec;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --surface-2: #222220; --hover: #242422;
+  --border: rgba(255, 255, 255, 0.10); --border-strong: rgba(255, 255, 255, 0.16);
+  --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781; --track: #2c2c2a;
+  --c-user: #3987e5; --c-apps: #d95926; --c-cache: #199e70; --c-dev: #c98500; --c-system: #d55181; --c-other: #6f6e69;
+  --on-dev: #fff;
+  --good-ink: #0ca30c; --code: #262624; --focus: #6da7ec; --link: #6da7ec;
+  --shadow: none;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 48px; }
+@media (max-width: 640px) { .page { padding: 20px 16px 40px; } }
+
+/* masthead */
+.mast-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.eyebrow { font-size: 12px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; font-weight: 600; }
+h1 { font-size: 22px; line-height: 1.25; margin: 2px 0 2px; font-weight: 650; }
+.meta { color: var(--ink-2); font-size: 13px; }
+.ghost { background: transparent; border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 10px;
+  cursor: pointer; display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.ghost:hover { background: var(--hover); }
+.hero { margin: 22px 0 14px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; }
+.hero-num { font-size: 52px; line-height: 1; font-weight: 650; letter-spacing: -.02em; }
+.hero-sub { color: var(--ink-2); font-size: 16px; }
+.hero-sub b { color: var(--ink); font-weight: 600; }
+
+/* the drive bar: one whole split into parts */
+.segbar { display: flex; gap: 2px; height: 28px; margin-top: 6px; }
+.seg { position: relative; height: 28px; border-radius: 4px; min-width: 3px; display: flex; align-items: center;
+  padding: 0 8px; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: default; }
+.seg .lbl { pointer-events: none; }
+.seg.free { background: var(--track); color: var(--ink-2); font-weight: 500; }
+.legend { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px;
+  color: var(--ink-2); font-size: 13px; }
+.legend li { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 10px; height: 10px; border-radius: 3px; flex: none; display: inline-block; }
+.tip { position: fixed; z-index: 20; background: var(--surface); color: var(--ink); border: 1px solid var(--border-strong);
+  border-radius: 8px; padding: 8px 10px; font-size: 13px; box-shadow: 0 6px 24px rgba(0, 0, 0, .12);
+  pointer-events: none; max-width: 280px; }
+.tip b { display: block; }
+.tip span { color: var(--ink-2); }
+
+/* tabs and search */
+.bar-row { position: sticky; top: 0; z-index: 10; background: var(--page); margin: 28px -4px 0; padding: 10px 4px 10px;
+  border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.tab { border: 0; background: transparent; padding: 6px 8px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
+.tab:hover { background: var(--hover); }
+.tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: inset 0 0 0 1px var(--border-strong);
+  font-weight: 600; }
+.tab small { color: var(--muted); font-weight: 500; font-size: 12px; }
+.search { flex: 1 1 100%; position: relative; }
+@media (max-width: 860px) { .bar-row { position: static; } }
+.search input { width: 100%; padding: 8px 12px 8px 32px; border-radius: 8px; border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--ink); font: inherit; }
+.search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+
+/* cards and sections */
+main { margin-top: 20px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
+  margin-bottom: 18px; overflow: hidden; }
+.card-head { padding: 16px 18px 12px; display: flex; justify-content: space-between; gap: 12px; align-items: flex-end;
+  flex-wrap: wrap; }
+.card-head h2 { font-size: 16px; margin: 0; font-weight: 650; }
+.card-head p { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; max-width: 640px; }
+.card-head .total { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.card-head .total b { font-size: 18px; color: var(--ink); font-weight: 650; margin-right: 4px; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 6px 0 14px; flex-wrap: wrap; }
+.section-head h2 { margin: 0; font-size: 20px; font-weight: 650; }
+.section-head .sw { width: 12px; height: 12px; }
+.section-head .total { color: var(--ink-2); }
+.section-head .total b { color: var(--ink); font-size: 20px; margin-right: 4px; font-weight: 650; }
+.section-desc { margin: -6px 0 16px; color: var(--ink-2); max-width: 720px; }
+.note-line { display: flex; gap: 8px; align-items: flex-start; color: var(--ink-2); font-size: 13px;
+  margin: 0 0 14px; }
+.note-line svg { flex: none; margin-top: 2px; color: var(--muted); }
+
+/* stat tiles */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+@media (max-width: 860px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+  box-shadow: var(--shadow); }
+.tile .label { display: flex; align-items: center; gap: 7px; color: var(--ink-2); font-size: 13px; }
+.tile .value { font-size: 26px; font-weight: 650; margin-top: 4px; line-height: 1.15; }
+.tile .hint { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+/* category table (the bar's table view) */
+.cats { width: 100%; }
+.cat-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px 92px; gap: 14px; align-items: center; width: 100%;
+  padding: 11px 18px; border: 0; border-top: 1px solid var(--border); background: transparent; text-align: left;
+  cursor: pointer; }
+.cat-row:hover { background: var(--hover); }
+.cat-name { display: flex; gap: 10px; align-items: flex-start; }
+.cat-name .sw { margin-top: 5px; }
+.cat-name b { font-weight: 600; }
+.cat-name span { display: block; color: var(--ink-2); font-size: 13px; }
+.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.num small { display: block; color: var(--muted); font-size: 12px; }
+@media (max-width: 640px) { .cat-row { grid-template-columns: minmax(0, 1fr) 84px; } .cat-row .meter { display: none; } }
+
+/* meters */
+.meter { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; }
+.meter i { display: block; height: 100%; border-radius: 999px; min-width: 2px; }
+
+/* item rows */
+.rows { border-top: 1px solid var(--border); }
+.row { border-bottom: 1px solid var(--border); }
+.row:last-child { border-bottom: 0; }
+.row-head { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto 112px; gap: 12px; align-items: center;
+  width: 100%; padding: 10px 18px 10px 14px; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.row-head:hover { background: var(--hover); }
+.chev { color: var(--muted); transition: transform .15s; display: inline-flex; }
+.row-head[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.row-name { font-weight: 600; overflow-wrap: anywhere; }
+.row-name .tag { margin-left: 6px; }
+.row-sub { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.row-size { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.row-size .meter { width: 100%; }
+.row-size .num { font-weight: 600; }
+@media (max-width: 640px) {
+  .row-head { grid-template-columns: 18px minmax(0, 1fr) 84px; padding-right: 14px; }
+  .row-head .badge-cell { grid-column: 2; grid-row: 2; justify-self: start; }
+}
+.nested { background: var(--surface-2); border-top: 1px solid var(--border); }
+.nested .row-head { padding-left: 30px; }
+
+/* badges and tags */
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 7px; border-radius: 999px;
+  border: 1px solid var(--border-strong); font-size: 12px; color: var(--ink-2); white-space: nowrap; background: var(--surface); }
+.badge svg { flex: none; }
+.tag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--ink-2);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; vertical-align: 1px;
+  white-space: nowrap; }
+.tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+.tag.plain::before { background: var(--muted); }
+
+/* row details */
+.detail { padding: 4px 18px 18px 44px; display: grid; gap: 14px; }
+@media (max-width: 640px) { .detail { padding-left: 18px; } }
+.detail p { margin: 0; }
+.detail h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+  font-weight: 650; }
+.action { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.detail .notes { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.detail .notes li { display: flex; gap: 8px; align-items: flex-start; }
+.detail .notes svg { flex: none; margin-top: 2px; }
+code { font: 12.5px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--code);
+  border-radius: 5px; padding: 1px 5px; overflow-wrap: anywhere; }
+.copy { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 6px; padding: 0 6px;
+  font-size: 11px; color: var(--ink-2); cursor: pointer; margin-left: 4px; vertical-align: 1px; }
+.copy:hover { background: var(--hover); }
+.copy.done { color: var(--good-ink); }
+.path { font: 12.5px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--ink-2); overflow-wrap: anywhere; }
+.mini { display: grid; gap: 2px; }
+.mini-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(60px, 160px) 76px; gap: 10px; align-items: center;
+  padding: 3px 0; font-size: 13px; }
+.mini-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-row .name small { color: var(--muted); margin-left: 6px; }
+.mini-row .num { color: var(--ink); }
+.linkish { border: 0; background: none; padding: 0; color: var(--link); cursor: pointer; text-align: left; font: inherit; }
+.linkish:hover { text-decoration: underline; }
+@media (max-width: 640px) { .mini-row { grid-template-columns: minmax(0, 1fr) 70px; } .mini-row .meter { display: none; } }
+.files { display: grid; gap: 4px; }
+.file-row { display: grid; grid-template-columns: minmax(0, 1fr) 92px 70px; gap: 10px; font-size: 13px; align-items: baseline; }
+.file-row .path { overflow-wrap: anywhere; }
+.file-row .date { color: var(--muted); font-size: 12px; white-space: nowrap; }
+@media (max-width: 640px) { .file-row { grid-template-columns: minmax(0, 1fr) 70px; } .file-row .date { display: none; } }
+.more { display: block; width: 100%; padding: 11px 18px; border: 0; border-top: 1px solid var(--border);
+  background: transparent; color: var(--link); cursor: pointer; text-align: left; }
+.more:hover { background: var(--hover); }
+.small-line { padding: 10px 18px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); }
+.empty { padding: 22px 18px; color: var(--ink-2); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+.badge-help { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 18px;
+  padding: 4px 18px 18px; }
+.badge-help div { color: var(--ink-2); font-size: 13px; }
+.badge-help .badge { margin-bottom: 4px; }
+.dup { padding: 12px 18px; border-top: 1px solid var(--border); }
+.dup-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dup-head b { font-weight: 600; }
+.dup-head span { color: var(--ink-2); font-size: 13px; }
+.dup ul { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.dup li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.foot { margin-top: 28px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.foot p { margin: 0 0 4px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div class="mast-row">
+      <div>
+        <div class="eyebrow">Disk report</div>
+        <h1 id="title"></h1>
+        <div class="meta" id="meta"></div>
+      </div>
+      <button id="theme" class="ghost" type="button"></button>
+    </div>
+    <div class="hero"><div class="hero-num" id="hero-num"></div><div class="hero-sub" id="hero-sub"></div></div>
+    <div class="segbar" id="segbar" role="img"></div>
+    <ul class="legend" id="legend"></ul>
+  </header>
+  <div class="bar-row">
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Sections"></nav>
+    <label class="search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="search" type="search" placeholder="Search folders, apps, paths…" aria-label="Search">
+    </label>
+  </div>
+  <main id="main"></main>
+  <footer class="foot" id="foot"></footer>
+</div>
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<script id="report-data" type="application/json">__REPORT_DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("report-data").textContent);
+const M = DATA.meta;
+const ITEMS = DATA.items;
+const BY_ID = new Map(ITEMS.map(i => [i.id, i]));
+const GB = 1024 ** 3, MB = 1024 ** 2;
+
+const SEGS = [
+  { id: "user", name: "Your files", cats: ["user"],
+    desc: "Documents, Desktop, Downloads, Pictures… Only you can decide what can go." },
+  { id: "apps", name: "Apps & their data", cats: ["app", "appdata"],
+    desc: "Installed programs plus the settings and data they keep. Remove them by uninstalling." },
+  { id: "cache", name: "Caches & temporary files", cats: ["cache"],
+    desc: "Copies apps can rebuild or download again. Most of it is safe to clean." },
+  { id: "dev", name: "Developer tools", cats: ["dev"],
+    desc: "SDKs, emulators, Docker, virtual machines and project folders that can be rebuilt." },
+  { id: "system", name: "Windows & system", cats: ["system"],
+    desc: "Windows itself, its component store, the page file and the hibernation file." },
+  { id: "other", name: "Other & hidden", cats: ["other"],
+    desc: "Folders the report doesn't recognise, and space Windows doesn't let the scan see." },
+];
+const SEG_OF = { user: "user", app: "apps", appdata: "apps", cache: "cache", dev: "dev", system: "system", other: "other" };
+const CAT_LABEL = { user: "Your files", app: "Program", appdata: "App data", cache: "Cache", dev: "Developer",
+  system: "Windows", other: "Other" };
+const SAFETY = {
+  safe: { label: "Safe to clean", icon: "check", help: "Deleting it loses nothing: it's rebuilt or downloaded again." },
+  optional: { label: "Optional", icon: "warn", help: "It can go, with a trade-off explained under “What you can do”." },
+  review: { label: "Your files", icon: "user", help: "Only you can tell what's still needed." },
+  uninstall: { label: "Uninstall to remove", icon: "box", help: "Remove the app in Settings → Apps instead of deleting folders by hand." },
+  keep: { label: "Keep", icon: "lock", help: "Needed by Windows or by an app you use." },
+  unknown: { label: "Unknown", icon: "q", help: "Not recognised. Check what it is before deleting anything." },
+};
+const FLAG_LABEL = { leftover: "Probably left over", unlinked: "No app points here", nomatch: "No matching app",
+  unused: "Not used" };
+
+const ICONS = {
+  check: '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="var(--good)"/><path d="m4.8 8.2 2.1 2.1 4.3-4.6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  warn: '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6 15 14H1L8 1.6Z" fill="var(--warning)"/><path d="M8 6v3.6" stroke="#0b0b0b" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.8" r=".95" fill="#0b0b0b"/></svg>',
+  user: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--muted)" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="5.5" r="2.8"/><path d="M2.8 14c.6-2.8 2.7-4.3 5.2-4.3s4.6 1.5 5.2 4.3"/></svg>',
+  box: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 5 8 2l5.5 3v6L8 14l-5.5-3V5Z"/><path d="M2.5 5 8 8l5.5-3M8 8v6"/></svg>',
+  lock: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--muted)" stroke-width="1.5" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>',
+  q: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--muted)" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M6.2 6.2a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".5" fill="var(--muted)"/></svg>',
+  info: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.2v4" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".6" fill="currentColor"/></svg>',
+  file: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-linejoin="round" style="vertical-align:-1px" aria-label="file"><path d="M4 1.5h5.5L13 5v9.5H4z"/><path d="M9.5 1.5V5H13"/></svg>',
+  chev: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg>',
+  moon: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1Z"/></svg>',
+  sun: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3 3l1.1 1.1M11.9 11.9 13 13M3 13l1.1-1.1M11.9 4.1 13 3"/></svg>',
+};
+
+// ------------------------------------------------------------------ helpers
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function size(n) {
+  if (n >= 100 * GB) return Math.round(n / GB) + " GB";
+  if (n >= GB) return (n / GB).toFixed(1) + " GB";
+  if (n >= MB) return Math.round(n / MB) + " MB";
+  return Math.max(1, Math.round(n / 1024)) + " KB";
+}
+const pct = (n, of) => of ? (n / of * 100 < 0.1 && n > 0 ? "<0.1" : (n / of * 100).toFixed(n / of * 100 >= 10 ? 0 : 1)) + "%" : "";
+const fmtInt = n => n.toLocaleString("en-US");
+function date(t) {
+  if (!t) return "";
+  return new Date(t * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+function rel(path, base) {
+  if (base && path.toLowerCase().startsWith(base.toLowerCase() + "\\")) return path.slice(base.length + 1);
+  return path;
+}
+function rich(text) {
+  // escape, then turn `code` into code chips with a copy button
+  return esc(text).replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code><button class="copy" type="button" data-copy="${c}">Copy</button>`);
+}
+function badge(safety) {
+  const s = SAFETY[safety] || SAFETY.unknown;
+  return `<span class="badge" title="${esc(s.help)}">${ICONS[s.icon]}${esc(s.label)}</span>`;
+}
+const segColor = seg => `var(--c-${seg})`;
+const itemColor = it => segColor(SEG_OF[it.cat] || "other");
+function meter(value, max, color) {
+  const w = max > 0 ? Math.max(0.6, Math.min(100, value / max * 100)) : 0;
+  return `<div class="meter"><i style="width:${w}%;background:${color}"></i></div>`;
+}
+function copyText(text, btn) {
+  const done = () => { if (btn) { const old = btn.textContent; btn.textContent = "Copied"; btn.classList.add("done");
+    setTimeout(() => { btn.textContent = old; btn.classList.remove("done"); }, 1300); } };
+  const fallback = () => {
+    const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); done(); } catch (e) { /* nothing else to try */ }
+    ta.remove();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+  else fallback();
+}
+
+// ------------------------------------------------------------------ totals
+const segTotals = {};
+for (const s of SEGS) segTotals[s.id] = 0;
+for (const it of ITEMS) segTotals[SEG_OF[it.cat] || "other"] += it.size;
+for (const [cat, v] of Object.entries(DATA.small || {})) segTotals[SEG_OF[cat] || "other"] += v.size;
+const actionable = ITEMS.filter(i => !i.container && i.kind !== "hidden");
+const sumOf = list => list.reduce((a, i) => a + i.size, 0);
+const safeItems = actionable.filter(i => i.safety === "safe").sort((a, b) => b.size - a.size);
+const optionalItems = actionable.filter(i => i.safety === "optional").sort((a, b) => b.size - a.size);
+const dupWasted = (DATA.dupes || []).reduce((a, g) => a + g.size * (g.copies.length - 1), 0)
+  + (DATA.dupFolders || []).reduce((a, g) => a + g.size * (g.paths.length - 1), 0);
+
+// ------------------------------------------------------------------ state
+const state = { tab: "overview", query: "", open: new Set(), more: new Set(), safety: null };
+
+// ------------------------------------------------------------------ header
+function renderHeader() {
+  document.getElementById("title").textContent = M.drive + " drive";
+  const mins = M.seconds >= 90 ? Math.round(M.seconds / 60) + " min" : M.seconds + " s";
+  const [day, time] = M.generated.split(" ");
+  const when = new Date(day + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  document.getElementById("meta").textContent =
+    `Scanned ${when} at ${time} · ${fmtInt(M.files)} files in ${fmtInt(M.folders)} folders · took ${mins}` +
+    (M.admin ? " · as administrator" : "");
+  document.getElementById("hero-num").textContent = size(M.used);
+  document.getElementById("hero-sub").innerHTML = `used of ${esc(size(M.total))} · <b>${esc(size(M.free))} free</b>`;
+
+  const bar = document.getElementById("segbar");
+  const parts = SEGS.map(s => ({ id: s.id, name: s.name, value: segTotals[s.id], color: segColor(s.id), on: `var(--on-${s.id})` }));
+  bar.setAttribute("aria-label", "Drive " + M.drive + ": " + parts.map(p => `${p.name} ${size(p.value)}`).join(", ") +
+    `, free ${size(M.free)}, total ${size(M.total)}`);
+  bar.innerHTML = parts.map(p =>
+    `<div class="seg" tabindex="0" data-name="${esc(p.name)}" data-value="${p.value}" data-seg="${p.id}"
+      style="flex:${p.value} 1 0;background:${p.color};color:${p.on}"><span class="lbl">${pct(p.value, M.total)}</span></div>`
+  ).join("") + `<div class="seg free" tabindex="0" data-name="Free space" data-value="${M.free}"
+      style="flex:${M.free} 1 0"><span class="lbl">${esc(size(M.free))} free</span></div>`;
+  document.getElementById("legend").innerHTML = parts.map(p =>
+    `<li><span class="sw" style="background:${p.color}"></span>${esc(p.name)}</li>`).join("") +
+    `<li><span class="sw" style="background:var(--track)"></span>Free space</li>`;
+  fitLabels();
+  const tip = document.getElementById("tip");
+  const show = (el, x, y) => {
+    const v = +el.dataset.value;
+    tip.innerHTML = `<b>${esc(el.dataset.name)} · ${esc(size(v))}</b><span>${pct(v, M.total)} of the drive` +
+      (el.dataset.seg ? ` · ${pct(v, M.used)} of the used space` : "") + "</span>";
+    tip.hidden = false;
+    const r = tip.getBoundingClientRect();
+    tip.style.left = Math.max(8, Math.min(window.innerWidth - r.width - 8, x - r.width / 2)) + "px";
+    tip.style.top = Math.max(8, y - r.height - 12) + "px";
+  };
+  bar.querySelectorAll(".seg").forEach(el => {
+    el.addEventListener("mousemove", e => show(el, e.clientX, el.getBoundingClientRect().top));
+    el.addEventListener("focus", () => { const r = el.getBoundingClientRect(); show(el, r.left + r.width / 2, r.top); });
+    el.addEventListener("mouseleave", () => { tip.hidden = true; });
+    el.addEventListener("blur", () => { tip.hidden = true; });
+    if (el.dataset.seg) el.addEventListener("click", () => setTab(el.dataset.seg));
+    if (el.dataset.seg) el.style.cursor = "pointer";
+  });
+}
+function fitLabels() {
+  // a label prints inside its block only when it fits; otherwise it takes no space at all
+  document.querySelectorAll("#segbar .seg").forEach(el => {
+    const lbl = el.querySelector(".lbl");
+    lbl.style.display = "";
+    if (lbl.scrollWidth + 14 > el.clientWidth) lbl.style.display = "none";
+  });
+}
+window.addEventListener("resize", fitLabels);
+
+// ------------------------------------------------------------------ tabs
+const TAB_NAMES = { user: "Your files", apps: "Apps", cache: "Caches", dev: "Developer", system: "Windows", other: "Other" };
+function tabs() {
+  const list = [{ id: "overview", name: "Overview" }];
+  for (const s of SEGS) list.push({ id: s.id, name: TAB_NAMES[s.id], size: segTotals[s.id], color: segColor(s.id) });
+  if ((DATA.dupes || []).length || (DATA.dupFolders || []).length) list.push({ id: "dupes", name: "Duplicates", size: dupWasted });
+  return list;
+}
+function renderTabs() {
+  document.getElementById("tabs").innerHTML = tabs().map(t =>
+    `<button class="tab" role="tab" type="button" data-tab="${t.id}" aria-selected="${state.tab === t.id && !state.query}">` +
+    (t.color ? `<span class="sw" style="background:${t.color}"></span>` : "") +
+    `${esc(t.name)}${t.size != null ? ` <small>${esc(size(t.size))}</small>` : ""}</button>`).join("");
+}
+function setTab(id, keepScroll) {
+  state.tab = id; state.query = ""; state.safety = null;
+  document.getElementById("search").value = "";
+  render();
+  if (!keepScroll) {
+    const top = document.querySelector(".bar-row").getBoundingClientRect().top + window.scrollY;
+    if (window.scrollY > top) window.scrollTo({ top: top });
+  }
+}
+
+// ------------------------------------------------------------------ rows
+function subLine(it) {
+  if (it.kind === "hidden") return "Not in any folder";
+  if (it.kind === "artifacts" || it.kind === "merged") {
+    const n = it.partCount || (it.parts || []).length;
+    if (n > 1) return `${n} folders` + (it.group ? ` · ${it.group}` : "");
+  }
+  return (it.paths && it.paths[0]) || "";
+}
+function flagTags(it) {
+  return (it.flags || []).filter(f => FLAG_LABEL[f]).map(f =>
+    `<span class="tag${f === "unused" ? " plain" : ""}">${esc(FLAG_LABEL[f])}</span>`).join("");
+}
+function itemRow(it, max, opts = {}) {
+  const open = state.open.has(it.id);
+  return `<div class="row" data-id="${it.id}">
+    <button class="row-head" type="button" aria-expanded="${open}" data-toggle="${it.id}">
+      <span class="chev">${ICONS.chev}</span>
+      <span><span class="row-name">${esc(it.name)}${flagTags(it)}${opts.showCat ? ` <span class="tag plain">${esc(CAT_LABEL[it.cat])}</span>` : ""}</span>
+        <span class="row-sub">${esc(subLine(it))}</span></span>
+      <span class="badge-cell">${badge(it.safety)}</span>
+      <span class="row-size"><span class="num">${esc(size(it.size))}</span>${meter(it.size, max, itemColor(it))}</span>
+    </button>
+    ${open ? `<div class="detail">${details(it)}</div>` : ""}
+  </div>`;
+}
+function details(it) {
+  const out = [];
+  const base = it.paths && it.paths[0];
+  out.push(`<p>${rich(it.desc || "")}</p>`);
+  if (it.action) out.push(`<div class="action"><h4>What you can do</h4><p>${rich(it.action)}</p></div>`);
+  if (it.notes && it.notes.length) out.push(`<ul class="notes">${it.notes.map(n =>
+    `<li>${(it.flags || []).some(f => f !== "unused" && FLAG_LABEL[f]) ? ICONS.warn : ICONS.info}<span>${rich(n)}</span></li>`).join("")}</ul>`);
+  const facts = [];
+  if (it.group && it.group !== it.name) facts.push(`Belongs to <b>${esc(it.group)}</b>`);
+  if (it.files) facts.push(`${fmtInt(it.files)} files`);
+  if (facts.length) out.push(`<p class="meta">${facts.join(" · ")}</p>`);
+  if (it.parts && it.parts.length) {
+    const max = it.parts[0][1];
+    out.push(`<div><h4>${it.kind === "artifacts" ? "Where they are" : "Folders"}${it.partCount > it.parts.length ? ` (largest ${it.parts.length} of ${it.partCount})` : ""}</h4>
+      <div class="files">${it.parts.map(([p, s, t]) => `<div class="file-row"><span class="path">${esc(p)} <button class="copy" type="button" data-copy="${esc(p)}">Copy</button></span>
+      <span class="date">${t ? "changed " + esc(date(t)) : ""}</span><span class="num">${esc(size(s))}</span></div>`).join("")}</div></div>`);
+  } else if (base) {
+    out.push(`<div><h4>Location</h4>${(it.paths || []).map(p =>
+      `<div class="path">${esc(p)} <button class="copy" type="button" data-copy="${esc(p)}">Copy path</button></div>`).join("")}</div>`);
+  }
+  if (it.kids && it.kids.length) {
+    const max = it.kids[0][1];
+    const rows = it.kids.map(([name, s, isFile, other]) => {
+      const o = other != null ? BY_ID.get(other) : null;
+      const where = o ? ` <small>→ <button class="linkish" type="button" data-reveal="${o.id}">${esc(o.name)}</button></small>` : "";
+      return `<div class="mini-row"><span class="name" title="${esc(name)}">${isFile ? ICONS.file + " " : ""}${esc(name)}${where}</span>
+        ${meter(s, max, o ? itemColor(o) : itemColor(it))}<span class="num">${esc(size(s))}</span></div>`;
+    });
+    if (it.rest) rows.push(`<div class="mini-row"><span class="name"><i>Everything else</i></span>${meter(it.rest, max, "var(--muted)")}<span class="num">${esc(size(it.rest))}</span></div>`);
+    out.push(`<div><h4>What's inside</h4><div class="mini">${rows.join("")}</div></div>`);
+  }
+  if (it.elsewhere && it.elsewhere.length) {
+    out.push(`<div><h4>Inside this folder but counted elsewhere</h4><div class="mini">${it.elsewhere.map(([p, s, id]) => {
+      const o = BY_ID.get(id);
+      return `<div class="mini-row"><span class="name" title="${esc(p)}">${esc(rel(p, base))}${o ? ` <small>→ <button class="linkish" type="button" data-reveal="${o.id}">${esc(o.name)}</button></small>` : ""}</span>
+        ${meter(s, it.elsewhere[0][1], o ? itemColor(o) : "var(--muted)")}<span class="num">${esc(size(s))}</span></div>`;
+    }).join("")}</div></div>`);
+  }
+  if (it.types && it.types.length) {
+    const max = it.types[0][1];
+    out.push(`<div><h4>File types</h4><div class="mini">${it.types.map(([t, s, n]) =>
+      `<div class="mini-row"><span class="name">${esc(t)} <small>${fmtInt(n)} files</small></span>${meter(s, max, itemColor(it))}<span class="num">${esc(size(s))}</span></div>`).join("")}</div></div>`);
+  }
+  if (it.ages && it.ages.some(Boolean)) {
+    const labels = ["Changed in the last month", "1 to 12 months ago", "1 to 3 years ago", "More than 3 years ago"];
+    const max = Math.max(...it.ages);
+    out.push(`<div><h4>Last changed</h4><div class="mini">${it.ages.map((s, i) => s ? `<div class="mini-row"><span class="name">${labels[i]}</span>${meter(s, max, itemColor(it))}<span class="num">${esc(size(s))}</span></div>` : "").join("")}</div></div>`);
+  }
+  if (it.big && it.big.length && it.kind !== "artifacts") {
+    out.push(`<div><h4>Biggest files</h4><div class="files">${it.big.map(([p, s, t]) =>
+      `<div class="file-row"><span class="path" title="${esc(p)}">${esc(rel(p, base))} <button class="copy" type="button" data-copy="${esc(p)}">Copy</button></span><span class="date">${esc(date(t))}</span><span class="num">${esc(size(s))}</span></div>`).join("")}</div></div>`);
+  }
+  return out.join("");
+}
+function rowList(list, key, opts = {}) {
+  if (!list.length) return `<div class="empty">Nothing here.</div>`;
+  const limit = opts.limit || 30, floor = opts.floor ?? 20 * MB;
+  const showAll = state.more.has(key);
+  let shown = list;
+  if (!showAll) {
+    shown = list.filter((it, i) => i < limit && (i < 8 || it.size >= floor));
+  }
+  const rest = list.slice(shown.length);
+  const max = list[0].size;
+  return `<div class="rows">${shown.map(it => itemRow(it, max, opts)).join("")}</div>` +
+    (rest.length ? `<button class="more" type="button" data-more="${esc(key)}">Show ${rest.length} more (${esc(size(sumOf(rest)))})</button>` : "");
+}
+
+// ------------------------------------------------------------------ views
+function overview() {
+  const user = segTotals.user;
+  const tiles = `<div class="tiles">
+    <div class="tile"><div class="label">${ICONS.check}Safe to clean</div><div class="value">${esc(size(sumOf(safeItems)))}</div>
+      <div class="hint">rebuilt or downloaded again when needed</div></div>
+    <div class="tile"><div class="label">${ICONS.warn}Optional, with a trade-off</div><div class="value">${esc(size(sumOf(optionalItems)))}</div>
+      <div class="hint">models, emulators, environments…</div></div>
+    <div class="tile"><div class="label">${ICONS.user}Your own files</div><div class="value">${esc(size(user))}</div>
+      <div class="hint">${pct(user, M.used)} of the used space</div></div>
+    <div class="tile"><div class="label">${ICONS.info}Duplicate copies</div><div class="value">${esc(size(dupWasted))}</div>
+      <div class="hint">space used by extra copies</div></div>
+  </div>`;
+  const maxSeg = Math.max(...SEGS.map(s => segTotals[s.id]));
+  const cats = `<div class="card"><div class="card-head"><div><h2>Where the space goes</h2>
+      <p>Every byte in use belongs to exactly one of these groups. Select one to see what's inside.</p></div></div>
+    <div class="cats">${SEGS.map(s => `<button class="cat-row" type="button" data-tab="${s.id}">
+      <span class="cat-name"><span class="sw" style="background:${segColor(s.id)}"></span><span><b>${esc(s.name)}</b><span>${esc(s.desc)}</span></span></span>
+      ${meter(segTotals[s.id], maxSeg, segColor(s.id))}
+      <span class="num"><b>${esc(size(segTotals[s.id]))}</b><small>${pct(segTotals[s.id], M.used)} of used</small></span></button>`).join("")}</div></div>`;
+  const biggest = [...ITEMS].filter(i => !i.container).sort((a, b) => b.size - a.size);
+  const big = `<div class="card"><div class="card-head"><div><h2>Biggest items</h2>
+      <p>The largest single things on the drive, whatever group they're in.</p></div></div>${rowList(biggest, "biggest", { limit: 15, floor: 0, showCat: true })}</div>`;
+  const safe = `<div class="card"><div class="card-head"><div><h2>Safe to clean</h2>
+      <p>Caches and leftovers you can delete without losing anything. Open an item to see how.</p></div>
+      <div class="total"><b>${esc(size(sumOf(safeItems)))}</b>in ${safeItems.length} items</div></div>${rowList(safeItems, "safe", { limit: 12, floor: 0, showCat: true })}</div>`;
+  const opt = `<div class="card"><div class="card-head"><div><h2>Bigger savings, with a trade-off</h2>
+      <p>Things you can remove if you accept what's explained under each one (re-downloads, rebuilds, lost settings).</p></div>
+      <div class="total"><b>${esc(size(sumOf(optionalItems)))}</b>in ${optionalItems.length} items</div></div>${rowList(optionalItems, "optional", { limit: 10, floor: 0, showCat: true })}</div>`;
+  const help = `<div class="card"><div class="card-head"><div><h2>What the labels mean</h2></div></div>
+    <div class="badge-help">${Object.keys(SAFETY).map(k => `<div>${badge(k)}<br>${esc(SAFETY[k].help)}</div>`).join("")}</div></div>`;
+  return tiles + cats + big + safe + opt + help;
+}
+function sectionHead(seg) {
+  const s = SEGS.find(x => x.id === seg);
+  return `<div class="section-head"><span class="sw" style="background:${segColor(seg)}"></span><h2>${esc(s.name)}</h2>
+    <span class="total"><b>${esc(size(segTotals[seg]))}</b>${pct(segTotals[seg], M.used)} of the used space</span></div>
+    <p class="section-desc">${esc(s.desc)}</p>`;
+}
+function smallLine(cats) {
+  let n = 0, s = 0;
+  for (const c of cats) { const v = (DATA.small || {})[c]; if (v) { n += v.count; s += v.size; } }
+  return n ? `<div class="small-line">Plus ${fmtInt(n)} small ${n === 1 ? "item" : "items"} under 1 MB each (${esc(size(s))} in total).</div>` : "";
+}
+function noteLine(text) { return `<p class="note-line">${ICONS.info}<span>${text}</span></p>`; }
+function categoryView(seg) {
+  const s = SEGS.find(x => x.id === seg);
+  const list = ITEMS.filter(i => s.cats.includes(i.cat)).sort((a, b) => b.size - a.size);
+  let extra = "";
+  if (seg === "user" && M.cloud > 0) extra += noteLine(`Online-only files (OneDrive, phone, Synology…) add up to ${esc(size(M.cloud))}. They live in the cloud or on the device and use no space here, so they're not counted.`);
+  if (seg === "system" && M.hardlinks > 0) extra += noteLine(`${esc(size(M.hardlinks))} of Windows files are stored once but appear in two folders (WinSxS and System32). They're counted once here, which is why Windows looks smaller than in other tools.`);
+  if (seg === "other" && !M.admin) extra += noteLine("Run the report as administrator to measure System Restore points and see a few protected folders.");
+  return sectionHead(seg) + extra + `<div class="card">${rowList(list, "cat-" + seg)}${smallLine(s.cats)}</div>`;
+}
+function appsView() {
+  const groups = new Map();
+  for (const it of ITEMS) {
+    const key = it.group || it.name;
+    if (!groups.has(key)) groups.set(key, { name: key, items: [], size: 0, elsewhere: 0 });
+    const g = groups.get(key);
+    g.items.push(it);
+    if (it.cat === "app" || it.cat === "appdata") g.size += it.size; else g.elsewhere += it.size;
+  }
+  const list = [...groups.values()].filter(g => g.size > 0).sort((a, b) => b.size - a.size);
+  for (const g of list) g.items.sort((a, b) => b.size - a.size);
+  const max = list.length ? list[0].size : 0;
+  const key = "apps";
+  const showAll = state.more.has(key);
+  const shown = showAll ? list : list.filter((g, i) => i < 40 && (i < 8 || g.size >= 20 * MB));
+  const rest = list.slice(shown.length);
+  const rows = shown.map(g => {
+    const prog = sumOf(g.items.filter(i => i.cat === "app")), dat = sumOf(g.items.filter(i => i.cat === "appdata"));
+    const bits = [];
+    if (prog) bits.push(`Program ${size(prog)}`);
+    if (dat) bits.push(`Data ${size(dat)}`);
+    if (g.elsewhere >= MB) bits.push(`+ ${size(g.elsewhere)} cache & tools in other groups`);
+    const main = g.items.find(i => i.cat === "app") || g.items[0];
+    const flags = [...new Set(g.items.filter(i => i.cat === "app" || i.cat === "appdata").flatMap(i => i.flags || []))];
+    const allLeft = g.items.filter(i => i.cat === "app" || i.cat === "appdata").every(i => (i.flags || []).some(f => f === "leftover" || f === "unlinked" || f === "nomatch"));
+    const gid = "g:" + g.name;
+    const open = state.open.has(gid);
+    const tag = allLeft && flags.length ? `<span class="tag">${esc(FLAG_LABEL[flags.find(f => FLAG_LABEL[f])] || "Probably left over")}</span>` : "";
+    return `<div class="row">
+      <button class="row-head" type="button" aria-expanded="${open}" data-toggle="${esc(gid)}">
+        <span class="chev">${ICONS.chev}</span>
+        <span><span class="row-name">${esc(g.name)}${tag}</span><span class="row-sub">${esc(bits.join(" · "))}</span></span>
+        <span class="badge-cell">${badge(main.safety)}</span>
+        <span class="row-size"><span class="num">${esc(size(g.size))}</span>${meter(g.size, max, segColor("apps"))}</span>
+      </button>
+      ${open ? `<div class="nested">${g.items.map(it => itemRow(it, g.items[0].size, { showCat: true })).join("")}</div>` : ""}
+    </div>`;
+  }).join("");
+  return sectionHead("apps") +
+    noteLine("Each row is one app with its program files and the data it keeps. Caches and developer files that belong to an app are counted in their own groups, and shown here too when you open the app.") +
+    `<div class="card"><div class="rows">${rows}</div>` +
+    (rest.length ? `<button class="more" type="button" data-more="${key}">Show ${rest.length} more apps (${esc(size(rest.reduce((a, g) => a + g.size, 0)))})</button>` : "") +
+    smallLine(["app", "appdata"]) + `</div>`;
+}
+function dupesView() {
+  const files = DATA.dupes || [], folders = DATA.dupFolders || [];
+  const syncTag = s => s ? ` <span class="tag plain">synced with ${esc(s)}</span>` : "";
+  const fileCards = files.map(g => `<div class="dup"><div class="dup-head"><b>${esc(g.copies[0][0].split("\\").pop())}</b>
+      <span>${g.copies.length} copies of ${esc(size(g.size))} · ${esc(size(g.size * (g.copies.length - 1)))} in extra copies</span></div>
+      <ul>${g.copies.map(([p, t, s]) => `<li><span class="path">${esc(p)}</span>${syncTag(s)}<span class="meta">${esc(date(t))}</span>
+        <button class="copy" type="button" data-copy="${esc(p)}">Copy path</button></li>`).join("")}</ul></div>`).join("");
+  const folderCards = folders.map(g => `<div class="dup"><div class="dup-head"><b>${esc(g.paths[0].split("\\").pop())}</b>
+      <span>${g.paths.length} identical folders of ${esc(size(g.size))} (${fmtInt(g.files)} files)</span></div>
+      <ul>${g.paths.map((p, i) => `<li><span class="path">${esc(p)}</span>${syncTag(g.sync && g.sync[i])}
+        <button class="copy" type="button" data-copy="${esc(p)}">Copy path</button></li>`).join("")}</ul></div>`).join("");
+  return `<div class="section-head"><h2>Duplicates</h2><span class="total"><b>${esc(size(dupWasted))}</b>in extra copies</span></div>
+    <p class="section-desc">Files of 20 MB or more in your own folders that are identical (same size, same content at the start, middle and end), and folders with exactly the same files. Keep one copy of each, unless the other is a deliberate backup (for example in a synced folder).</p>` +
+    (folderCards ? `<div class="card"><div class="card-head"><div><h2>Identical folders</h2></div></div>${folderCards}</div>` : "") +
+    (fileCards ? `<div class="card"><div class="card-head"><div><h2>Identical files</h2></div></div>${fileCards}</div>` : "") +
+    (!fileCards && !folderCards ? `<div class="card"><div class="empty">No duplicates found.</div></div>` : "");
+}
+function searchView(q) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = ITEMS.filter(it => {
+    const hay = [it.name, it.group, it.desc, ...(it.paths || []), ...((it.parts || []).map(p => p[0]))].join(" ").toLowerCase();
+    return words.every(w => hay.includes(w));
+  }).sort((a, b) => b.size - a.size);
+  return `<div class="section-head"><h2>Search</h2><span class="total"><b>${hits.length}</b>results for “${esc(q)}” · ${esc(size(sumOf(hits)))}</span></div>` +
+    `<div class="card">${rowList(hits, "search:" + q, { limit: 60, floor: 0, showCat: true })}</div>`;
+}
+
+// ------------------------------------------------------------------ render and events
+function render() {
+  renderTabs();
+  const main = document.getElementById("main");
+  if (state.query) main.innerHTML = searchView(state.query);
+  else if (state.tab === "overview") main.innerHTML = overview();
+  else if (state.tab === "apps") main.innerHTML = appsView();
+  else if (state.tab === "dupes") main.innerHTML = dupesView();
+  else main.innerHTML = categoryView(state.tab);
+}
+function reveal(id) {
+  const it = BY_ID.get(id);
+  if (!it) return;
+  state.open.add(id);
+  const seg = SEG_OF[it.cat] || "other";
+  if (it.cat === "app" || it.cat === "appdata") state.open.add("g:" + (it.group || it.name));
+  state.more.add(seg === "apps" ? "apps" : "cat-" + seg);
+  setTab(seg, true);
+  requestAnimationFrame(() => {
+    const el = document.querySelector(`.row[data-id="${id}"]`);
+    if (el) { el.scrollIntoView({ block: "center" }); el.querySelector(".row-head").focus({ preventScroll: true }); }
+  });
+}
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-copy],[data-toggle],[data-tab],[data-more],[data-reveal]");
+  if (!t) return;
+  if (t.dataset.copy != null) { e.stopPropagation(); copyText(t.dataset.copy, t); return; }
+  if (t.dataset.reveal != null) { reveal(+t.dataset.reveal); return; }
+  if (t.dataset.tab) { setTab(t.dataset.tab); return; }
+  if (t.dataset.more) { state.more.add(t.dataset.more); render(); return; }
+  if (t.dataset.toggle != null) {
+    const raw = t.dataset.toggle, key = /^\d+$/.test(raw) ? +raw : raw;
+    if (state.open.has(key)) state.open.delete(key); else state.open.add(key);
+    const y = t.getBoundingClientRect().top;
+    render();
+    const again = document.querySelector(`[data-toggle="${CSS.escape(raw)}"]`);
+    if (again) { window.scrollBy(0, again.getBoundingClientRect().top - y); again.focus({ preventScroll: true }); }
+  }
+});
+let searchTimer = 0;
+document.getElementById("search").addEventListener("input", e => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { state.query = e.target.value.trim(); render(); }, 150);
+});
+
+// theme: follows Windows unless you pick one
+const themeBtn = document.getElementById("theme");
+function currentTheme() {
+  const set = document.documentElement.dataset.theme;
+  return set || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+}
+function paintThemeButton() {
+  const dark = currentTheme() === "dark";
+  themeBtn.innerHTML = (dark ? ICONS.sun : ICONS.moon) + (dark ? "Light" : "Dark");
+  themeBtn.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+}
+try { const saved = localStorage.getItem("disk-report-theme"); if (saved) document.documentElement.dataset.theme = saved; } catch (e) { /* storage off */ }
+themeBtn.addEventListener("click", () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("disk-report-theme", next); } catch (e) { /* storage off */ }
+  paintThemeButton();
+});
+paintThemeButton();
+
+document.getElementById("foot").innerHTML = [
+  `<p>This report only reads your drive: nothing was deleted or changed. Sizes are size on disk (1 GB = 1024³ bytes).</p>`,
+  M.cloud ? `<p>Online-only cloud files (${esc(size(M.cloud))}) aren't counted, because they use no space on this PC.</p>` : "",
+  M.hardlinks ? `<p>${esc(size(M.hardlinks))} of Windows files stored in two folders at once were counted once.</p>` : "",
+  M.denied ? `<p>${fmtInt(M.denied)} folders couldn't be read${M.admin ? "" : " (run the report as administrator to include more of them)"}; their size is part of “Space the scan can't see”.</p>` : "",
+  `<p>disk-report ${esc(M.version)}</p>`,
+].join("");
+
+renderHeader();
+render();
+</script>
+</body>
+</html>
