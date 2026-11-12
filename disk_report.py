@@ -3,7 +3,8 @@
 
 The report sorts everything into your files, apps and their data, caches, developer tools
 and Windows itself, and says for each item what it is, whether it's safe to delete and how
-to clean it. It only reads: nothing is ever deleted or changed.
+to clean it. The scan only reads: nothing is deleted or changed. (The desktop app, app.py,
+uses the same scan and adds buttons to act on what it finds, one item at a time.)
 
     py disk_report.py              scan C: and open the report
     py disk_report.py --drive D    scan another drive
@@ -35,7 +36,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import catalog as K  # noqa: E402
 
-VERSION = "1.0"
+VERSION = "2.0"
+# next to this file, or inside the app when it's packaged with PyInstaller
+TEMPLATE = os.path.join(getattr(sys, "_MEIPASS", HERE), "report_template.html")
 MB = 1024 ** 2
 GB = 1024 ** 3
 KEEP_NODE = 2 * MB      # folders smaller than this are folded into their parent
@@ -88,7 +91,13 @@ SYNC_PROVIDERS = {"onedrive": "OneDrive", "synologydrive": "Synology Drive", "cr
                   "googledrivefs": "Google Drive", "dropbox": "Dropbox", "icloud": "iCloud"}
 
 
+class Cancelled(Exception):
+    """Raised inside a scan when its cancel event is set."""
+
+
 def say(text, end="\n"):
+    if sys.stdout is None:   # a windowed app has no console
+        return
     sys.stdout.write(text + end)
     sys.stdout.flush()
 
@@ -244,8 +253,10 @@ def values(key):
 def run_powershell(script, timeout=180):
     full = "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[Text.Encoding]::UTF8;" + script
     try:
+        # stdin from DEVNULL: a windowed app has no console input to pass on
         done = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                               "-Command", full], capture_output=True, timeout=timeout, creationflags=NO_WINDOW)
+                               "-Command", full], capture_output=True, stdin=subprocess.DEVNULL, timeout=timeout,
+                              creationflags=NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         return None
     return done.stdout.decode("utf-8-sig", "replace").strip() or None
@@ -345,9 +356,11 @@ class SysInfo:
 
     def read_uninstall(self):
         seen = set()
-        views = [(winreg.HKEY_LOCAL_MACHINE, winreg.KEY_WOW64_64KEY), (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_WOW64_32KEY),
-                 (winreg.HKEY_CURRENT_USER, 0)]
-        for hive, view in views:
+        # (hive, view, and how the app finds the same key again when you click Uninstall)
+        views = [(winreg.HKEY_LOCAL_MACHINE, winreg.KEY_WOW64_64KEY, "HKLM", 64),
+                 (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_WOW64_32KEY, "HKLM", 32),
+                 (winreg.HKEY_CURRENT_USER, 0, "HKCU", 0)]
+        for hive, view, hive_name, bits in views:
             try:
                 root = winreg.OpenKey(hive, r"Software\Microsoft\Windows\CurrentVersion\Uninstall", 0,
                                       winreg.KEY_READ | view)
@@ -363,10 +376,14 @@ class SysInfo:
                     name = v.get("DisplayName")
                     if not isinstance(name, str) or not name.strip() or v.get("ParentKeyName"):
                         continue
+                    command = v.get("UninstallString")
                     entry = {"name": name.strip(), "publisher": (v.get("Publisher") or "").strip()
                              if isinstance(v.get("Publisher"), str) else "",
                              "system": v.get("SystemComponent") == 1,
-                             "dir": self.install_dir(v)}
+                             "dir": self.install_dir(v),
+                             "ref": {"hive": hive_name, "view": bits, "key": sub},
+                             "removable": isinstance(command, str) and bool(command.strip())
+                             and v.get("NoRemove") != 1}
                     key = (entry["name"].lower(), (entry["dir"] or "").lower())
                     if key not in seen:
                         seen.add(key)
@@ -375,7 +392,8 @@ class SysInfo:
     def read_packages(self):
         out = run_powershell(
             "$p=@(Get-AppxPackage|ForEach-Object{[pscustomobject]@{n=$_.Name;f=$_.PackageFamilyName;"
-            "l=$_.InstallLocation;fw=[bool]$_.IsFramework;s=[string]$_.SignatureKind;nr=[bool]$_.NonRemovable}});"
+            "u=$_.PackageFullName;l=$_.InstallLocation;fw=[bool]$_.IsFramework;s=[string]$_.SignatureKind;"
+            "nr=[bool]$_.NonRemovable}});"
             "$s=@(Get-StartApps|ForEach-Object{[pscustomobject]@{n=$_.Name;a=$_.AppID}});"
             "ConvertTo-Json -Compress -Depth 3 @{p=$p;s=$s}")
         if not out:
@@ -570,7 +588,7 @@ class Node:
 class Scanner:
     """Walks the drive once and keeps a tree of every folder of 2 MB or more."""
 
-    def __init__(self, cluster, stat_roots, windows_dir):
+    def __init__(self, cluster, stat_roots, windows_dir, progress=None, cancel=None):
         self.cluster = cluster
         self.stats = {p.lower(): [{}, [0, 0, 0, 0]] for p in stat_roots}   # per your-files folder: types, ages
         self.windows_dir = windows_dir.lower()
@@ -579,11 +597,14 @@ class Scanner:
         self.denied = []
         self.files = 0
         self.dirs = 0
+        self.counted = 0         # bytes on disk seen so far, for a progress bar
         self.stack = []
         self.now = time.time()
         self.started = time.time()
         self.next_report = 0.0
         self.quiet = False
+        self.progress = progress  # called with the scanner about twice a second; prints a line when None
+        self.cancel = cancel      # a threading.Event: setting it stops the scan with Cancelled
 
     def report(self, final=False):
         now = time.time()
@@ -591,10 +612,15 @@ class Scanner:
             return
         if final or now >= self.next_report:
             self.next_report = now + 0.5
+            if self.progress is not None:
+                self.progress(self)
+                return
             say("\r  Scanning... %s files in %s folders (%d s)   " % (format(self.files, ","), format(self.dirs, ","),
                                                                      now - self.started), end="\n" if final else "")
 
     def scan(self, path, node, acc, in_windows):
+        if self.cancel is not None and self.cancel.is_set():
+            raise Cancelled()
         self.dirs += 1
         try:
             entries = os.scandir(LONG + path)
@@ -653,6 +679,7 @@ class Scanner:
                 if chain is not None:
                     self.windows_files.append((base + name, d, chain))
         self.files += files
+        self.counted += size
         node.size, node.files, node.cloud, node.marks = size, files, cloud, marks
         for name, mtime in subdirs:
             child = Node(name, mtime)
@@ -1264,6 +1291,8 @@ def add_details(cls, scanner, info):
         tops = top_level_nodes(item)
         raw = sum(n.size for _, n in tops)
         details = item.details
+        if len(tops) > 1:
+            details["targets"] = [p for p, _ in tops][:5000]   # every folder of the item, for the app's actions
         if raw - item.size >= MB:
             outside = []
             for path, node in tops:
@@ -1456,6 +1485,7 @@ def build_data(cls, scanner, info, usage, drive, seconds, dedupe_saved, dupes, d
         rec.update(it.details)
         items.append(rec)
     return {
+        "apps": uninstallers(info),
         "meta": {
             "version": VERSION, "drive": drive, "total": total, "used": used, "free": free,
             "generated": dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "seconds": round(seconds),
@@ -1471,8 +1501,23 @@ def build_data(cls, scanner, info, usage, drive, seconds, dedupe_saved, dupes, d
     }
 
 
+def uninstallers(info):
+    """App group -> the installed programs in it that Windows can uninstall (what Settings → Apps would offer)."""
+    out = defaultdict(list)
+    for e in info.uninstall:
+        if e.get("removable") and not e.get("system"):
+            out[canon_group(e["name"], True)].append({"name": e["name"], "kind": "win32", "ref": e["ref"]})
+    for p in info.packages:
+        pfn = p.get("f") or ""
+        if p.get("fw") or p.get("nr") or p.get("s") == "System" or not p.get("u") or pfn not in info.package_names:
+            continue   # frameworks, built-in apps and add-ons without a Start menu entry
+        name = info.package_name(pfn)
+        out[canon_group(name, True)].append({"name": name, "kind": "store", "package": p["u"], "dir": p.get("l")})
+    return dict(out)
+
+
 def write_report(data, out_dir, drive):
-    with open(os.path.join(HERE, "report_template.html"), encoding="utf-8") as f:
+    with open(TEMPLATE, encoding="utf-8") as f:
         template = f.read()
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     html = template.replace("__REPORT_TITLE__", "Disk report – %s" % drive).replace("__REPORT_DATA__", payload)
@@ -1482,6 +1527,70 @@ def write_report(data, out_dir, drive):
     with open(path, "w", encoding="utf-8") as f:
         f.write(html)
     return path
+
+
+def normalize_drive(text):
+    """'c', 'C:', 'C:\\' -> 'C:'"""
+    return text.strip().rstrip(":\\/").upper() + ":"
+
+
+def run(drive, progress=None, cancel=None):
+    """Scan a drive ('C:') and return the report data.
+
+    progress(stage, text, scanner) is called when a step starts (with its text) and about twice a
+    second while the drive is walked (with the scanner, to read .files, .dirs and .counted). Without
+    it, the steps are printed. Setting the cancel event stops the scan with Cancelled.
+    """
+    started = time.time()
+    root = drive + "\\"
+
+    def step(stage, text):
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+        if progress is None:
+            say("  " + text)
+        else:
+            progress(stage, text, None)
+
+    tokens = path_tokens(drive)
+    info = SysInfo(drive, tokens)
+    step("apps", "Reading the list of installed apps...")
+    info.load()
+    step("apps", "%d installed programs, %d Store apps" % (len(info.uninstall), len(info.packages)))
+
+    usage = shutil.disk_usage(root)
+    stat_roots = [tokens[t] for t in ("%DOCUMENTS%", "%DESKTOP%", "%DOWNLOADS%", "%PICTURES%", "%VIDEOS%", "%MUSIC%")
+                  if tokens.get(t)]
+    walk_progress = (lambda s: progress("scan", None, s)) if progress is not None else None
+    scanner = Scanner(cluster_size(root), stat_roots, tokens["%WIN%"], walk_progress, cancel)
+    tree = Node(drive)
+    if progress is not None:
+        progress("scan", "Scanning the drive...", scanner)
+    run_with_big_stack(lambda: scanner.scan(root, tree, None, False))
+    scanner.report(final=True)
+
+    step("windows", "Checking Windows files that are stored once but appear twice...")
+    saved = scanner.dedupe_windows()
+    step("windows", "%s of Windows files counted once instead of twice" % human(saved))
+
+    windows_apps = (tokens["%PF%"] + "\\WindowsApps").lower()
+    store = [p["l"].rstrip("\\") for p in info.packages if (p.get("l") or "").lower().startswith(windows_apps + "\\")]
+    if store:
+        step("store", "Measuring %d Store apps..." % len(store))
+        scanner.quiet = True
+        run_with_big_stack(lambda: [scanner.graft(tree, drive, p) for p in store])
+        scanner.denied = [d for d in scanner.denied if d.lower() != windows_apps]
+
+    step("explain", "Explaining what was found...")
+    cls = Classifier(tree, drive, tokens, info, scanner)
+    cls.run()
+    add_details(cls, scanner, info)
+    step("dupes", "Looking for duplicate files...")
+    dupes = find_duplicates(cls, scanner, info)
+    dup_folders = find_duplicate_folders(cls, info)
+
+    return build_data(cls, scanner, info, (usage.total, usage.used, usage.free), drive, time.time() - started,
+                      saved, dupes, dup_folders)
 
 
 def main():
@@ -1496,54 +1605,18 @@ def main():
     except AttributeError:
         pass
 
-    drive = args.drive.strip().rstrip(":\\/").upper() + ":"
+    drive = normalize_drive(args.drive)
     root = drive + "\\"
     if not os.path.isdir(root):
         say("Drive %s not found." % drive)
         return 1
     started = time.time()
     say("Disk report for %s%s" % (root, " (administrator)" if is_admin() else ""))
-
-    tokens = path_tokens(drive)
-    info = SysInfo(drive, tokens)
-    say("  Reading the list of installed apps...")
-    info.load()
-    say("  %d installed programs, %d Store apps" % (len(info.uninstall), len(info.packages)))
-
-    usage = shutil.disk_usage(root)
-    stat_roots = [tokens[t] for t in ("%DOCUMENTS%", "%DESKTOP%", "%DOWNLOADS%", "%PICTURES%", "%VIDEOS%", "%MUSIC%")
-                  if tokens.get(t)]
-    scanner = Scanner(cluster_size(root), stat_roots, tokens["%WIN%"])
-    tree = Node(drive)
-    run_with_big_stack(lambda: scanner.scan(root, tree, None, False))
-    scanner.report(final=True)
-
-    say("  Checking Windows files that are stored once but appear twice...")
-    saved = scanner.dedupe_windows()
-    say("  %s of Windows files counted once instead of twice" % human(saved))
-
-    windows_apps = (tokens["%PF%"] + "\\WindowsApps").lower()
-    store = [p["l"].rstrip("\\") for p in info.packages if (p.get("l") or "").lower().startswith(windows_apps + "\\")]
-    if store:
-        say("  Measuring %d Store apps..." % len(store))
-        scanner.quiet = True
-        run_with_big_stack(lambda: [scanner.graft(tree, drive, p) for p in store])
-        scanner.denied = [d for d in scanner.denied if d.lower() != windows_apps]
-
-    say("  Explaining what was found...")
-    cls = Classifier(tree, drive, tokens, info, scanner)
-    cls.run()
-    add_details(cls, scanner, info)
-    say("  Looking for duplicate files...")
-    dupes = find_duplicates(cls, scanner, info)
-    dup_folders = find_duplicate_folders(cls, info)
-
-    data = build_data(cls, scanner, info, (usage.total, usage.used, usage.free), drive, time.time() - started,
-                      saved, dupes, dup_folders)
+    data = run(drive)
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
-        if not os.path.exists(os.path.join(HERE, "report_template.html")):
+        if not os.path.exists(TEMPLATE):
             say("Saved %s" % args.json)
             return 0
     path = write_report(data, args.out, drive)

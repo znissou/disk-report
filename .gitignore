@@ -4,3 +4,8 @@ reports/
 
 __pycache__/
 *.pyc
+
+# app build
+.venv/
+build/
+dist/

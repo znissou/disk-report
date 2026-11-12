@@ -12,7 +12,8 @@
   --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781; --track: #e1e0d9;
   --c-user: #2a78d6; --c-apps: #eb6834; --c-cache: #1baf7a; --c-dev: #eda100; --c-system: #e87ba4; --c-other: #898781;
   --on-user: #fff; --on-apps: #fff; --on-cache: #fff; --on-dev: #0b0b0b; --on-system: #fff; --on-other: #fff;
-  --good: #0ca30c; --warning: #fab219; --good-ink: #006300;
+  --good: #0ca30c; --warning: #fab219; --good-ink: #006300; --good-bg: rgba(12, 163, 12, 0.10);
+  --danger: #c4321f; --danger-line: rgba(196, 50, 31, 0.45); --danger-bg: rgba(196, 50, 31, 0.07);
   --code: #efeee9; --focus: #2a78d6; --link: #256abf;
   --shadow: 0 1px 2px rgba(11, 11, 11, 0.04);
 }
@@ -24,7 +25,9 @@
     --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781; --track: #2c2c2a;
     --c-user: #3987e5; --c-apps: #d95926; --c-cache: #199e70; --c-dev: #c98500; --c-system: #d55181; --c-other: #6f6e69;
     --on-dev: #fff;
-    --good-ink: #0ca30c; --code: #262624; --focus: #6da7ec; --link: #6da7ec;
+    --good-ink: #0ca30c; --good-bg: rgba(12, 163, 12, 0.16);
+    --danger: #ff7b6b; --danger-line: rgba(255, 123, 107, 0.5); --danger-bg: rgba(255, 123, 107, 0.10);
+    --code: #262624; --focus: #6da7ec; --link: #6da7ec;
     --shadow: none;
   }
 }
@@ -35,7 +38,9 @@
   --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781; --track: #2c2c2a;
   --c-user: #3987e5; --c-apps: #d95926; --c-cache: #199e70; --c-dev: #c98500; --c-system: #d55181; --c-other: #6f6e69;
   --on-dev: #fff;
-  --good-ink: #0ca30c; --code: #262624; --focus: #6da7ec; --link: #6da7ec;
+  --good-ink: #0ca30c; --good-bg: rgba(12, 163, 12, 0.16);
+  --danger: #ff7b6b; --danger-line: rgba(255, 123, 107, 0.5); --danger-bg: rgba(255, 123, 107, 0.10);
+  --code: #262624; --focus: #6da7ec; --link: #6da7ec;
   --shadow: none;
 }
 * { box-sizing: border-box; }
@@ -45,22 +50,26 @@ body {
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 button { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 48px; }
 @media (max-width: 640px) { .page { padding: 20px 16px 40px; } }
 
 /* masthead */
-.mast-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.mast-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 .eyebrow { font-size: 12px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; font-weight: 600; }
 h1 { font-size: 22px; line-height: 1.25; margin: 2px 0 2px; font-weight: 650; }
 .meta { color: var(--ink-2); font-size: 13px; }
 .ghost { background: transparent; border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 10px;
   cursor: pointer; display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
 .ghost:hover { background: var(--hover); }
+.tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .hero { margin: 22px 0 14px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; }
 .hero-num { font-size: 52px; line-height: 1; font-weight: 650; letter-spacing: -.02em; }
 .hero-sub { color: var(--ink-2); font-size: 16px; }
 .hero-sub b { color: var(--ink); font-weight: 600; }
+.freed { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--good-ink); background: var(--good-bg);
+  border-radius: 999px; padding: 3px 10px 3px 7px; font-weight: 600; align-self: center; }
 
 /* the drive bar: one whole split into parts */
 .segbar { display: flex; gap: 2px; height: 28px; margin-top: 6px; }
@@ -173,6 +182,9 @@ main { margin-top: 20px; }
   white-space: nowrap; }
 .tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
 .tag.plain::before { background: var(--muted); }
+.tag.ok { color: var(--good-ink); }
+.tag.ok::before { background: var(--good); }
+.tag.busy::before { background: var(--c-user); }
 
 /* row details */
 .detail { padding: 4px 18px 18px 44px; display: grid; gap: 14px; }
@@ -190,6 +202,7 @@ code { font: 12.5px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; back
   font-size: 11px; color: var(--ink-2); cursor: pointer; margin-left: 4px; vertical-align: 1px; }
 .copy:hover { background: var(--hover); }
 .copy.done { color: var(--good-ink); }
+.copy.run { display: inline-flex; align-items: center; gap: 3px; color: var(--ink); }
 .path { font: 12.5px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--ink-2); overflow-wrap: anywhere; }
 .mini { display: grid; gap: 2px; }
 .mini-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(60px, 160px) 76px; gap: 10px; align-items: center;
@@ -224,6 +237,82 @@ code { font: 12.5px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; back
 .dup li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .foot { margin-top: 28px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .foot p { margin: 0 0 4px; }
+
+/* app: buttons and actions */
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-strong); background: var(--surface);
+  color: var(--ink); border-radius: 8px; padding: 5px 11px; font-size: 13px; line-height: 1.4; cursor: pointer;
+  white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn svg { flex: none; }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--page); }
+.btn.primary:hover { background: var(--ink); opacity: .88; }
+.btn.danger { color: var(--danger); border-color: var(--danger-line); }
+.btn.danger:hover { background: var(--danger-bg); }
+.btn.danger.solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.danger.solid:hover { background: var(--danger); opacity: .9; }
+select.drive { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 8px; padding: 5px 8px; cursor: pointer; }
+.acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.acts .meta { font-size: 12px; }
+.ib { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.ib:hover { background: var(--surface); border-color: var(--border-strong); color: var(--ink); }
+.ib.del:hover { color: var(--danger); border-color: var(--danger-line); }
+.racts { display: inline-flex; gap: 2px; justify-content: flex-end; }
+.file-row.has-acts { grid-template-columns: minmax(0, 1fr) 92px 70px 56px; align-items: center; }
+.mini-row.has-acts { grid-template-columns: minmax(0, 1fr) minmax(60px, 160px) 76px 56px; }
+@media (max-width: 640px) {
+  .file-row.has-acts, .mini-row.has-acts { grid-template-columns: minmax(0, 1fr) 70px 56px; }
+}
+.dup li .racts { margin-left: auto; }
+.row.gone > .row-head .nm, .gone .pt { text-decoration: line-through; text-decoration-color: var(--muted); color: var(--muted); }
+.gone .copy { display: none; }
+.group-acts { padding: 10px 18px 10px 44px; border-top: 1px solid var(--border); }
+
+/* app: scan progress, empty drive, dialogs, messages */
+.banner { margin-top: 18px; }
+.banner .card { margin: 0; padding: 14px 18px; display: grid; gap: 10px; }
+.banner-row { display: flex; align-items: center; gap: 12px; }
+.banner-row .grow { flex: 1 1 auto; min-width: 0; }
+.banner-row b { display: block; font-weight: 600; }
+.banner-row .sub { color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.progress { height: 6px; border-radius: 999px; background: var(--track); overflow: hidden; }
+.progress i { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--c-user); transition: width .4s ease; }
+.spin { width: 18px; height: 18px; flex: none; border-radius: 50%; border: 2px solid var(--track); border-top-color: var(--c-user);
+  animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } .progress i { transition: none; } }
+.empty-state { padding: 52px 24px 56px; text-align: center; }
+.empty-state h2 { margin: 0 0 6px; font-size: 20px; font-weight: 650; }
+.empty-state p { margin: 0 auto 20px; max-width: 520px; color: var(--ink-2); }
+.empty-state .btn { font-size: 14px; padding: 8px 16px; }
+dialog.dlg { width: min(600px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--border-strong); border-radius: 14px;
+  background: var(--surface); color: var(--ink); box-shadow: 0 24px 64px rgba(0, 0, 0, .28); }
+dialog.dlg::backdrop { background: rgba(0, 0, 0, .38); }
+.dlg-body { padding: 20px 22px 16px; display: grid; gap: 12px; }
+.dlg-body h3 { margin: 0; font-size: 17px; line-height: 1.35; font-weight: 650; overflow-wrap: anywhere; }
+.dlg-body p { margin: 0; color: var(--ink-2); }
+.dlg-facts { display: grid; gap: 3px; max-height: 168px; overflow: auto; padding: 9px 12px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface-2); }
+.dlg-facts .path { font-size: 12px; }
+.dlg-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--ink-2); }
+.dlg-line b { color: var(--ink); font-weight: 600; }
+.dlg-warn { display: flex; gap: 8px; align-items: flex-start; margin: 0; color: var(--ink); font-size: 13px; }
+.dlg-warn svg { flex: none; margin-top: 2px; }
+.dlg-hint { font-size: 12px; color: var(--muted); }
+.dlg-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 22px;
+  border-top: 1px solid var(--border); background: var(--surface-2); }
+.dlg-busy { display: flex; align-items: center; gap: 10px; margin-right: auto; color: var(--ink-2); font-size: 13px; }
+#toasts { position: fixed; right: 16px; bottom: 16px; z-index: 40; display: grid; gap: 8px; width: min(440px, calc(100vw - 32px)); }
+.toast { display: flex; gap: 10px; align-items: flex-start; padding: 10px 8px 10px 12px; font-size: 13px; background: var(--surface);
+  border: 1px solid var(--border-strong); border-left: 4px solid var(--muted); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .16); }
+.toast.good { border-left-color: var(--good); }
+.toast.bad { border-left-color: var(--danger); }
+.toast.wait { border-left-color: var(--c-user); }
+.toast .grow { flex: 1 1 auto; min-width: 0; }
+.toast .acts { margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -235,13 +324,14 @@ code { font: 12.5px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; back
         <h1 id="title"></h1>
         <div class="meta" id="meta"></div>
       </div>
-      <button id="theme" class="ghost" type="button"></button>
+      <div class="tools" id="tools"><button id="theme" class="ghost" type="button"></button></div>
     </div>
-    <div class="hero"><div class="hero-num" id="hero-num"></div><div class="hero-sub" id="hero-sub"></div></div>
+    <div class="hero"><div class="hero-num" id="hero-num"></div><div class="hero-sub" id="hero-sub"></div><div id="hero-note"></div></div>
     <div class="segbar" id="segbar" role="img"></div>
     <ul class="legend" id="legend"></ul>
   </header>
-  <div class="bar-row">
+  <div class="banner" id="banner" hidden></div>
+  <div class="bar-row" id="bar-row">
     <nav class="tabs" id="tabs" role="tablist" aria-label="Sections"></nav>
     <label class="search">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -252,13 +342,16 @@ code { font: 12.5px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; back
   <footer class="foot" id="foot"></footer>
 </div>
 <div id="tip" class="tip" role="tooltip" hidden></div>
+<dialog id="dlg" class="dlg" aria-labelledby="dlg-title"></dialog>
+<div id="toasts" aria-live="polite"></div>
 <script id="report-data" type="application/json">__REPORT_DATA__</script>
 <script>
 "use strict";
-const DATA = JSON.parse(document.getElementById("report-data").textContent);
-const M = DATA.meta;
-const ITEMS = DATA.items;
-const BY_ID = new Map(ITEMS.map(i => [i.id, i]));
+// A saved report carries its data in the page. Inside the Disk Report app the data is null here: the page asks
+// the app for the latest scan instead, and gets buttons to act on what it shows.
+const EMBEDDED = JSON.parse(document.getElementById("report-data").textContent);
+let DATA = null, M = null, ITEMS = [], BY_ID = new Map();
+let segTotals = {}, actionable = [], safeItems = [], optionalItems = [], dupWasted = 0;
 const GB = 1024 ** 3, MB = 1024 ** 2;
 
 const SEGS = [
@@ -282,7 +375,7 @@ const SAFETY = {
   safe: { label: "Safe to clean", icon: "check", help: "Deleting it loses nothing: it's rebuilt or downloaded again." },
   optional: { label: "Optional", icon: "warn", help: "It can go, with a trade-off explained under “What you can do”." },
   review: { label: "Your files", icon: "user", help: "Only you can tell what's still needed." },
-  uninstall: { label: "Uninstall to remove", icon: "box", help: "Remove the app in Settings → Apps instead of deleting folders by hand." },
+  uninstall: { label: "Uninstall to remove", icon: "box", help: "Uninstall the app instead of deleting its folders by hand." },
   keep: { label: "Keep", icon: "lock", help: "Needed by Windows or by an app you use." },
   unknown: { label: "Unknown", icon: "q", help: "Not recognised. Check what it is before deleting anything." },
 };
@@ -301,6 +394,12 @@ const ICONS = {
   chev: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg>',
   moon: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1Z"/></svg>',
   sun: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3 3l1.1 1.1M11.9 11.9 13 13M3 13l1.1-1.1M11.9 4.1 13 3"/></svg>',
+  folder: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 4.3c0-.7.5-1.3 1.2-1.3h3.1l1.5 1.6h5.4c.7 0 1.2.5 1.2 1.2v6.3c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2z"/></svg>',
+  trash: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.2h11M6.2 4.2V2.8h3.6v1.4M4 4.2l.7 9.1c0 .5.4.9.9.9h4.8c.5 0 .9-.4.9-.9l.7-9.1M6.6 7v4.4M9.4 7v4.4"/></svg>',
+  scan: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.4 8.6A5.5 5.5 0 1 1 11.8 4"/><path d="M13.6 1.9v2.6H11"/></svg>',
+  run: '<svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11L13.5 8z" fill="currentColor"/></svg>',
+  unbox: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 5 8 2l5.5 3v6L8 14l-5.5-3V5Z"/><path d="M2.5 5 8 8l5.5-3M8 8v6"/></svg>',
+  out: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5"/><path d="M12 9.6v3.1c0 .5-.4.8-.8.8H3.3c-.5 0-.8-.3-.8-.8V4.8c0-.5.3-.8.8-.8h3.1"/></svg>',
 };
 
 // ------------------------------------------------------------------ helpers
@@ -313,6 +412,7 @@ function size(n) {
 }
 const pct = (n, of) => of ? (n / of * 100 < 0.1 && n > 0 ? "<0.1" : (n / of * 100).toFixed(n / of * 100 >= 10 ? 0 : 1)) + "%" : "";
 const fmtInt = n => n.toLocaleString("en-US");
+const plural = (n, one, many) => `${fmtInt(n)} ${n === 1 ? one : many}`;
 function date(t) {
   if (!t) return "";
   return new Date(t * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -321,9 +421,13 @@ function rel(path, base) {
   if (base && path.toLowerCase().startsWith(base.toLowerCase() + "\\")) return path.slice(base.length + 1);
   return path;
 }
+const baseName = p => p.replace(/\\+$/, "").split("\\").pop();
 function rich(text) {
-  // escape, then turn `code` into code chips with a copy button
-  return esc(text).replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code><button class="copy" type="button" data-copy="${c}">Copy</button>`);
+  // escape, then turn `code` into code chips with a copy button (and, in the app, a Run button for the catalog's
+  // cleaning commands)
+  return esc(text).replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code><button class="copy" type="button" data-copy="${c}">Copy</button>` +
+    (APP && Object.prototype.hasOwnProperty.call(APP.commands, c)
+      ? `<button class="copy run" type="button" data-act="run" data-cmd="${c}">${ICONS.run}Run</button>` : ""));
 }
 function badge(safety) {
   const s = SAFETY[safety] || SAFETY.unknown;
@@ -344,21 +448,26 @@ function copyText(text, btn) {
     try { document.execCommand("copy"); done(); } catch (e) { /* nothing else to try */ }
     ta.remove();
   };
+  if (APP) { api().copy(text).then(ok => ok ? done() : fallback(), fallback); return; }
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
   else fallback();
 }
 
-// ------------------------------------------------------------------ totals
-const segTotals = {};
-for (const s of SEGS) segTotals[s.id] = 0;
-for (const it of ITEMS) segTotals[SEG_OF[it.cat] || "other"] += it.size;
-for (const [cat, v] of Object.entries(DATA.small || {})) segTotals[SEG_OF[cat] || "other"] += v.size;
-const actionable = ITEMS.filter(i => !i.container && i.kind !== "hidden");
+// ------------------------------------------------------------------ data and totals
+function load(data) {
+  DATA = data; M = data.meta; ITEMS = data.items;
+  BY_ID = new Map(ITEMS.map(i => [i.id, i]));
+  segTotals = {};
+  for (const s of SEGS) segTotals[s.id] = 0;
+  for (const it of ITEMS) segTotals[SEG_OF[it.cat] || "other"] += it.size;
+  for (const [cat, v] of Object.entries(DATA.small || {})) segTotals[SEG_OF[cat] || "other"] += v.size;
+  actionable = ITEMS.filter(i => !i.container && i.kind !== "hidden");
+  safeItems = actionable.filter(i => i.safety === "safe").sort((a, b) => b.size - a.size);
+  optionalItems = actionable.filter(i => i.safety === "optional").sort((a, b) => b.size - a.size);
+  dupWasted = (DATA.dupes || []).reduce((a, g) => a + g.size * (g.copies.length - 1), 0)
+    + (DATA.dupFolders || []).reduce((a, g) => a + g.size * (g.paths.length - 1), 0);
+}
 const sumOf = list => list.reduce((a, i) => a + i.size, 0);
-const safeItems = actionable.filter(i => i.safety === "safe").sort((a, b) => b.size - a.size);
-const optionalItems = actionable.filter(i => i.safety === "optional").sort((a, b) => b.size - a.size);
-const dupWasted = (DATA.dupes || []).reduce((a, g) => a + g.size * (g.copies.length - 1), 0)
-  + (DATA.dupFolders || []).reduce((a, g) => a + g.size * (g.paths.length - 1), 0);
 
 // ------------------------------------------------------------------ state
 const state = { tab: "overview", query: "", open: new Set(), more: new Set(), safety: null };
@@ -388,11 +497,14 @@ function renderHeader() {
     `<li><span class="sw" style="background:${p.color}"></span>${esc(p.name)}</li>`).join("") +
     `<li><span class="sw" style="background:var(--track)"></span>Free space</li>`;
   fitLabels();
+  bindTips(bar, M.total, M.used);
+}
+function bindTips(bar, total, used) {
   const tip = document.getElementById("tip");
   const show = (el, x, y) => {
     const v = +el.dataset.value;
-    tip.innerHTML = `<b>${esc(el.dataset.name)} · ${esc(size(v))}</b><span>${pct(v, M.total)} of the drive` +
-      (el.dataset.seg ? ` · ${pct(v, M.used)} of the used space` : "") + "</span>";
+    tip.innerHTML = `<b>${esc(el.dataset.name)} · ${esc(size(v))}</b><span>${pct(v, total)} of the drive` +
+      (el.dataset.seg ? ` · ${pct(v, used)} of the used space` : "") + "</span>";
     tip.hidden = false;
     const r = tip.getBoundingClientRect();
     tip.style.left = Math.max(8, Math.min(window.innerWidth - r.width - 8, x - r.width / 2)) + "px";
@@ -456,10 +568,11 @@ function flagTags(it) {
 }
 function itemRow(it, max, opts = {}) {
   const open = state.open.has(it.id);
-  return `<div class="row" data-id="${it.id}">
+  const done = itemState(it);
+  return `<div class="row${done && done.state !== "partial" ? " gone" : ""}" data-id="${it.id}">
     <button class="row-head" type="button" aria-expanded="${open}" data-toggle="${it.id}">
       <span class="chev">${ICONS.chev}</span>
-      <span><span class="row-name">${esc(it.name)}${flagTags(it)}${opts.showCat ? ` <span class="tag plain">${esc(CAT_LABEL[it.cat])}</span>` : ""}</span>
+      <span><span class="row-name"><span class="nm">${esc(it.name)}</span>${flagTags(it)}${opts.showCat ? ` <span class="tag plain">${esc(CAT_LABEL[it.cat])}</span>` : ""}${stateTag(it, done)}</span>
         <span class="row-sub">${esc(subLine(it))}</span></span>
       <span class="badge-cell">${badge(it.safety)}</span>
       <span class="row-size"><span class="num">${esc(size(it.size))}</span>${meter(it.size, max, itemColor(it))}</span>
@@ -470,8 +583,10 @@ function itemRow(it, max, opts = {}) {
 function details(it) {
   const out = [];
   const base = it.paths && it.paths[0];
+  const del = rowDeletable(it);
   out.push(`<p>${rich(it.desc || "")}</p>`);
   if (it.action) out.push(`<div class="action"><h4>What you can do</h4><p>${rich(it.action)}</p></div>`);
+  if (APP) out.push(actionBar(it));
   if (it.notes && it.notes.length) out.push(`<ul class="notes">${it.notes.map(n =>
     `<li>${(it.flags || []).some(f => f !== "unused" && FLAG_LABEL[f]) ? ICONS.warn : ICONS.info}<span>${rich(n)}</span></li>`).join("")}</ul>`);
   const facts = [];
@@ -479,10 +594,12 @@ function details(it) {
   if (it.files) facts.push(`${fmtInt(it.files)} files`);
   if (facts.length) out.push(`<p class="meta">${facts.join(" · ")}</p>`);
   if (it.parts && it.parts.length) {
-    const max = it.parts[0][1];
     out.push(`<div><h4>${it.kind === "artifacts" ? "Where they are" : "Folders"}${it.partCount > it.parts.length ? ` (largest ${it.parts.length} of ${it.partCount})` : ""}</h4>
-      <div class="files">${it.parts.map(([p, s, t]) => `<div class="file-row"><span class="path">${esc(p)} <button class="copy" type="button" data-copy="${esc(p)}">Copy</button></span>
-      <span class="date">${t ? "changed " + esc(date(t)) : ""}</span><span class="num">${esc(size(s))}</span></div>`).join("")}</div></div>`);
+      <div class="files">${it.parts.map(([p, s, t]) => {
+        const done = pathState(p);
+        return `<div class="file-row${APP ? " has-acts" : ""}${done ? " gone" : ""}"><span class="path"><span class="pt">${esc(p)}</span> <button class="copy" type="button" data-copy="${esc(p)}">Copy</button>${done ? doneTag(done) : ""}</span>
+      <span class="date">${t ? "changed " + esc(date(t)) : ""}</span><span class="num">${esc(size(s))}</span>${rowActs(p, { id: it.id, del: del && !isProtected(p), contents: it.cat === "cache", size: s, done })}</div>`;
+      }).join("")}</div></div>`);
   } else if (base) {
     out.push(`<div><h4>Location</h4>${(it.paths || []).map(p =>
       `<div class="path">${esc(p)} <button class="copy" type="button" data-copy="${esc(p)}">Copy path</button></div>`).join("")}</div>`);
@@ -491,11 +608,13 @@ function details(it) {
     const max = it.kids[0][1];
     const rows = it.kids.map(([name, s, isFile, other]) => {
       const o = other != null ? BY_ID.get(other) : null;
+      const full = base + "\\" + name;
+      const done = o ? null : pathState(full);
       const where = o ? ` <small>→ <button class="linkish" type="button" data-reveal="${o.id}">${esc(o.name)}</button></small>` : "";
-      return `<div class="mini-row"><span class="name" title="${esc(name)}">${isFile ? ICONS.file + " " : ""}${esc(name)}${where}</span>
-        ${meter(s, max, o ? itemColor(o) : itemColor(it))}<span class="num">${esc(size(s))}</span></div>`;
+      return `<div class="mini-row${APP ? " has-acts" : ""}${done ? " gone" : ""}"><span class="name" title="${esc(name)}">${isFile ? ICONS.file + " " : ""}<span class="pt">${esc(name)}</span>${where}${done ? doneTag(done) : ""}</span>
+        ${meter(s, max, o ? itemColor(o) : itemColor(it))}<span class="num">${esc(size(s))}</span>${rowActs(full, { id: it.id, del: del && !o, file: isFile, size: s, done })}</div>`;
     });
-    if (it.rest) rows.push(`<div class="mini-row"><span class="name"><i>Everything else</i></span>${meter(it.rest, max, "var(--muted)")}<span class="num">${esc(size(it.rest))}</span></div>`);
+    if (it.rest) rows.push(`<div class="mini-row${APP ? " has-acts" : ""}"><span class="name"><i>Everything else</i></span>${meter(it.rest, max, "var(--muted)")}<span class="num">${esc(size(it.rest))}</span>${APP ? "<span></span>" : ""}</div>`);
     out.push(`<div><h4>What's inside</h4><div class="mini">${rows.join("")}</div></div>`);
   }
   if (it.elsewhere && it.elsewhere.length) {
@@ -516,8 +635,10 @@ function details(it) {
     out.push(`<div><h4>Last changed</h4><div class="mini">${it.ages.map((s, i) => s ? `<div class="mini-row"><span class="name">${labels[i]}</span>${meter(s, max, itemColor(it))}<span class="num">${esc(size(s))}</span></div>` : "").join("")}</div></div>`);
   }
   if (it.big && it.big.length && it.kind !== "artifacts") {
-    out.push(`<div><h4>Biggest files</h4><div class="files">${it.big.map(([p, s, t]) =>
-      `<div class="file-row"><span class="path" title="${esc(p)}">${esc(rel(p, base))} <button class="copy" type="button" data-copy="${esc(p)}">Copy</button></span><span class="date">${esc(date(t))}</span><span class="num">${esc(size(s))}</span></div>`).join("")}</div></div>`);
+    out.push(`<div><h4>Biggest files</h4><div class="files">${it.big.map(([p, s, t]) => {
+      const done = pathState(p);
+      return `<div class="file-row${APP ? " has-acts" : ""}${done ? " gone" : ""}"><span class="path" title="${esc(p)}"><span class="pt">${esc(rel(p, base))}</span> <button class="copy" type="button" data-copy="${esc(p)}">Copy</button>${done ? doneTag(done) : ""}</span><span class="date">${esc(date(t))}</span><span class="num">${esc(size(s))}</span>${rowActs(p, { id: it.id, del, file: true, size: s, done })}</div>`;
+    }).join("")}</div></div>`);
   }
   return out.join("");
 }
@@ -559,7 +680,7 @@ function overview() {
   const big = `<div class="card"><div class="card-head"><div><h2>Biggest items</h2>
       <p>The largest single things on the drive, whatever group they're in.</p></div></div>${rowList(biggest, "biggest", { limit: 15, floor: 0, showCat: true })}</div>`;
   const safe = `<div class="card"><div class="card-head"><div><h2>Safe to clean</h2>
-      <p>Caches and leftovers you can delete without losing anything. Open an item to see how.</p></div>
+      <p>Caches and leftovers you can delete without losing anything. Open an item to see how${APP ? ", and delete it from there" : ""}.</p></div>
       <div class="total"><b>${esc(size(sumOf(safeItems)))}</b>in ${safeItems.length} items</div></div>${rowList(safeItems, "safe", { limit: 12, floor: 0, showCat: true })}</div>`;
   const opt = `<div class="card"><div class="card-head"><div><h2>Bigger savings, with a trade-off</h2>
       <p>Things you can remove if you accept what's explained under each one (re-downloads, rebuilds, lost settings).</p></div>
@@ -586,7 +707,7 @@ function categoryView(seg) {
   let extra = "";
   if (seg === "user" && M.cloud > 0) extra += noteLine(`Online-only files (OneDrive, phone, Synology…) add up to ${esc(size(M.cloud))}. They live in the cloud or on the device and use no space here, so they're not counted.`);
   if (seg === "system" && M.hardlinks > 0) extra += noteLine(`${esc(size(M.hardlinks))} of Windows files are stored once but appear in two folders (WinSxS and System32). They're counted once here, which is why Windows looks smaller than in other tools.`);
-  if (seg === "other" && !M.admin) extra += noteLine("Run the report as administrator to measure System Restore points and see a few protected folders.");
+  if (seg === "other" && !M.admin) extra += noteLine(`Run ${APP ? "Disk Report" : "the report"} as administrator to measure System Restore points and see a few protected folders.`);
   return sectionHead(seg) + extra + `<div class="card">${rowList(list, "cat-" + seg)}${smallLine(s.cats)}</div>`;
 }
 function appsView() {
@@ -620,11 +741,11 @@ function appsView() {
     return `<div class="row">
       <button class="row-head" type="button" aria-expanded="${open}" data-toggle="${esc(gid)}">
         <span class="chev">${ICONS.chev}</span>
-        <span><span class="row-name">${esc(g.name)}${tag}</span><span class="row-sub">${esc(bits.join(" · "))}</span></span>
+        <span><span class="row-name">${esc(g.name)}${tag}${groupTag(g.name)}</span><span class="row-sub">${esc(bits.join(" · "))}</span></span>
         <span class="badge-cell">${badge(main.safety)}</span>
         <span class="row-size"><span class="num">${esc(size(g.size))}</span>${meter(g.size, max, segColor("apps"))}</span>
       </button>
-      ${open ? `<div class="nested">${g.items.map(it => itemRow(it, g.items[0].size, { showCat: true })).join("")}</div>` : ""}
+      ${open ? `<div class="nested">${groupActs(main)}${g.items.map(it => itemRow(it, g.items[0].size, { showCat: true })).join("")}</div>` : ""}
     </div>`;
   }).join("");
   return sectionHead("apps") +
@@ -636,14 +757,17 @@ function appsView() {
 function dupesView() {
   const files = DATA.dupes || [], folders = DATA.dupFolders || [];
   const syncTag = s => s ? ` <span class="tag plain">synced with ${esc(s)}</span>` : "";
+  const copyLine = (p, extra, opts) => {
+    const done = pathState(p);
+    return `<li${done ? ' class="gone"' : ""}><span class="path"><span class="pt">${esc(p)}</span></span>${extra}${done ? doneTag(done) : ""}
+        <button class="copy" type="button" data-copy="${esc(p)}">Copy path</button>${rowActs(p, Object.assign({ del: true, dup: true, done }, opts))}</li>`;
+  };
   const fileCards = files.map(g => `<div class="dup"><div class="dup-head"><b>${esc(g.copies[0][0].split("\\").pop())}</b>
       <span>${g.copies.length} copies of ${esc(size(g.size))} · ${esc(size(g.size * (g.copies.length - 1)))} in extra copies</span></div>
-      <ul>${g.copies.map(([p, t, s]) => `<li><span class="path">${esc(p)}</span>${syncTag(s)}<span class="meta">${esc(date(t))}</span>
-        <button class="copy" type="button" data-copy="${esc(p)}">Copy path</button></li>`).join("")}</ul></div>`).join("");
+      <ul>${g.copies.map(([p, t, s]) => copyLine(p, `${syncTag(s)}<span class="meta">${esc(date(t))}</span>`, { file: true, size: g.size })).join("")}</ul></div>`).join("");
   const folderCards = folders.map(g => `<div class="dup"><div class="dup-head"><b>${esc(g.paths[0].split("\\").pop())}</b>
       <span>${g.paths.length} identical folders of ${esc(size(g.size))} (${fmtInt(g.files)} files)</span></div>
-      <ul>${g.paths.map((p, i) => `<li><span class="path">${esc(p)}</span>${syncTag(g.sync && g.sync[i])}
-        <button class="copy" type="button" data-copy="${esc(p)}">Copy path</button></li>`).join("")}</ul></div>`).join("");
+      <ul>${g.paths.map((p, i) => copyLine(p, syncTag(g.sync && g.sync[i]), { size: g.size })).join("")}</ul></div>`).join("");
   return `<div class="section-head"><h2>Duplicates</h2><span class="total"><b>${esc(size(dupWasted))}</b>in extra copies</span></div>
     <p class="section-desc">Files of 20 MB or more in your own folders that are identical (same size, same content at the start, middle and end), and folders with exactly the same files. Keep one copy of each, unless the other is a deliberate backup (for example in a synced folder).</p>` +
     (folderCards ? `<div class="card"><div class="card-head"><div><h2>Identical folders</h2></div></div>${folderCards}</div>` : "") +
@@ -662,6 +786,7 @@ function searchView(q) {
 
 // ------------------------------------------------------------------ render and events
 function render() {
+  if (!DATA) return;
   renderTabs();
   const main = document.getElementById("main");
   if (state.query) main.innerHTML = searchView(state.query);
@@ -684,6 +809,12 @@ function reveal(id) {
   });
 }
 document.addEventListener("click", e => {
+  const a = e.target.closest("[data-act]");
+  if (a) {
+    e.stopPropagation();
+    if (!a.disabled) act(a).catch(err => { BUSY = false; toast(`Something went wrong: ${esc(err && err.message || err)}`, "bad"); });
+    return;
+  }
   const t = e.target.closest("[data-copy],[data-toggle],[data-tab],[data-more],[data-reveal]");
   if (!t) return;
   if (t.dataset.copy != null) { e.stopPropagation(); copyText(t.dataset.copy, t); return; }
@@ -721,20 +852,550 @@ themeBtn.addEventListener("click", () => {
   const next = currentTheme() === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   try { localStorage.setItem("disk-report-theme", next); } catch (e) { /* storage off */ }
+  if (APP) api().set_theme(next);
   paintThemeButton();
 });
 paintThemeButton();
 
-document.getElementById("foot").innerHTML = [
-  `<p>This report only reads your drive: nothing was deleted or changed. Sizes are size on disk (1 GB = 1024³ bytes).</p>`,
-  M.cloud ? `<p>Online-only cloud files (${esc(size(M.cloud))}) aren't counted, because they use no space on this PC.</p>` : "",
-  M.hardlinks ? `<p>${esc(size(M.hardlinks))} of Windows files stored in two folders at once were counted once.</p>` : "",
-  M.denied ? `<p>${fmtInt(M.denied)} folders couldn't be read${M.admin ? "" : " (run the report as administrator to include more of them)"}; their size is part of “Space the scan can't see”.</p>` : "",
-  `<p>disk-report ${esc(M.version)}</p>`,
-].join("");
+function renderFoot() {
+  const first = APP
+    ? "Scans only read your drive. Nothing is deleted or uninstalled unless you click and confirm, and nothing leaves this PC."
+    : "This report only reads your drive: nothing was deleted or changed.";
+  if (!M) { document.getElementById("foot").innerHTML = `<p>${first}</p>`; return; }
+  document.getElementById("foot").innerHTML = [
+    `<p>${first} Sizes are size on disk (1 GB = 1024³ bytes).</p>`,
+    M.cloud ? `<p>Online-only cloud files (${esc(size(M.cloud))}) aren't counted, because they use no space on this PC.</p>` : "",
+    M.hardlinks ? `<p>${esc(size(M.hardlinks))} of Windows files stored in two folders at once were counted once.</p>` : "",
+    M.denied ? `<p>${fmtInt(M.denied)} folders couldn't be read${M.admin ? "" : ` (run ${APP ? "Disk Report" : "the report"} as administrator to include more of them)`}; their size is part of “Space the scan can't see”.</p>` : "",
+    `<p>${APP ? "Disk Report " + esc(APP.version) + " · report made by version " + esc(M.version) : "disk-report " + esc(M.version)}</p>`,
+  ].join("");
+}
 
-renderHeader();
-render();
+// ================================================================== the app
+// Everything below runs only inside the Disk Report app, where window.pywebview.api reaches the Python side.
+let APP = null;               // what the app told us: drives, the scan's id, the cleaning commands it may run…
+let DONE = new Map();         // lower-case path -> {state} for what was deleted since this scan
+let GONE_APPS = new Set();    // app groups uninstalled since this scan
+let WAITING = new Set();      // app groups whose uninstaller is running
+let PROTECTED = new Set();    // folders the app never deletes whole (Documents, AppData…)
+let FREED = 0;                // bytes freed since this scan
+let PENDING = null;           // what the open dialog is about
+let BUSY = false;             // a dialog is working: Escape doesn't close it
+let SCAN = null;              // the running scan's status
+let LAST_DELETE = null;       // for "Delete the rest as administrator"
+const DELETABLE = new Set(["safe", "optional", "unknown", "review"]);
+const STATE_LABEL = { deleted: "Deleted", trashed: "In Recycle Bin", emptied: "Emptied", partial: "Partly deleted" };
+const SETTINGS_LINKS = [
+  [/Settings → System → Storage/, "storage", "Open Storage settings"],
+  [/Settings → Time & language → Language & region/, "language", "Open Language settings"],
+  [/System protection/, "protection", "Open System protection"],
+  [/Settings → Personalization → Fonts/, "fonts", "Open Fonts settings"],
+  [/Settings → Apps\b/, "apps", "Open Installed apps"],
+];
+const api = () => window.pywebview.api;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function whenApp(start) {
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.state) start();
+  else window.addEventListener("pywebviewready", start, { once: true });
+}
+async function startApp() {
+  APP = { commands: {}, drives: [], version: "" };   // so the first render already knows it's the app
+  try {
+    applyState(await api().state(null));
+  } catch (err) {
+    document.getElementById("main").innerHTML = `<div class="card"><div class="empty-state"><h2>Disk Report couldn't open its scans</h2>
+      <p>${esc(err && err.message || err)}</p></div></div>`;
+    return;
+  }
+  if (APP.scanning && APP.scanning.running) pollScan();
+}
+function applyState(st) {
+  APP = st;
+  PROTECTED = new Set(st.protected || []);
+  DONE = new Map(); GONE_APPS = new Set(); FREED = 0;
+  for (const r of st.done || []) applyRecord(r);
+  if (st.theme) { document.documentElement.dataset.theme = st.theme; paintThemeButton(); }
+  if (st.scan) {
+    load(st.scan);
+    document.getElementById("bar-row").hidden = false;
+    renderHeader(); render();
+  } else {
+    DATA = null; M = null; ITEMS = []; BY_ID = new Map();
+    renderEmpty();
+  }
+  renderFreed(); renderFoot(); renderTools();
+}
+function applyRecord(r) {
+  if (r.kind === "delete") {
+    for (const p of r.paths || []) if (p.state !== "failed") DONE.set(p.path.toLowerCase(), { state: p.state });
+    FREED += r.freed || 0;
+  } else if (r.kind === "empty-bin" && r.ok) {
+    FREED += r.freed || 0;
+    if (M) DONE.set((M.drive + "\\$recycle.bin").toLowerCase(), { state: "emptied" });
+  } else if (r.kind === "uninstall" && r.state === "removed") {
+    GONE_APPS.add(r.group);
+  }
+}
+
+// -- what each item and row can do
+const targetsOf = it => it.targets || it.paths || [];
+const isProtected = p => PROTECTED.has(p.toLowerCase().replace(/\\+$/, ""));
+const isRecycleBin = it => (it.paths || []).some(p => /^[a-z]:\\\$recycle\.bin$/i.test(p));
+function pathState(p) {
+  if (!APP || !DONE.size || !p) return null;
+  const own = p.toLowerCase();
+  let key = own;
+  for (;;) {
+    const s = DONE.get(key);
+    if (s) {
+      if (key === own) return s;
+      if (s.state === "partial") return null;            // inside a folder that's only partly gone: unknown
+      return { state: s.state === "trashed" ? "trashed" : "deleted" };
+    }
+    const cut = key.lastIndexOf("\\");
+    if (cut <= 2) return null;
+    key = key.slice(0, cut);
+  }
+}
+function itemState(it) {
+  if (!APP || !DONE.size) return null;
+  const paths = targetsOf(it);
+  if (!paths.length) return null;
+  const states = paths.map(pathState);
+  if (states.every(s => !s)) return null;
+  if (states.some(s => !s || s.state === "partial")) return { state: "partial" };
+  return states[0];
+}
+function stateTag(it, done) {
+  if (!APP) return "";
+  if (done) return doneTag(done);
+  // an uninstall removes the program; whether its data and caches went too, only the next scan can tell
+  if (it.group && it.cat === "app" && (GONE_APPS.has(it.group) || WAITING.has(it.group))) return groupTag(it.group);
+  return "";
+}
+function groupTag(group) {
+  if (!APP) return "";
+  if (WAITING.has(group)) return ` <span class="tag busy">Uninstalling…</span>`;
+  if (GONE_APPS.has(group)) return ` <span class="tag ok">Uninstalled</span>`;
+  return "";
+}
+const doneTag = s => ` <span class="tag ${s.state === "partial" ? "" : "ok"}">${esc(STATE_LABEL[s.state])}</span>`;
+function rowDeletable(it) {
+  if (!APP || it.container || it.kind === "hidden") return false;
+  return DELETABLE.has(it.safety) || (it.safety === "uninstall" && GONE_APPS.has(it.group));
+}
+function canDeleteItem(it) {
+  if (!rowDeletable(it) || isRecycleBin(it)) return false;
+  const paths = targetsOf(it);
+  if (!paths.length || paths.some(isProtected)) return false;
+  const done = itemState(it);
+  return !done || done.state === "partial";
+}
+function uninstallersFor(it) {
+  if (!APP || !DATA || !DATA.apps || !it.group || GONE_APPS.has(it.group) || WAITING.has(it.group)) return [];
+  if (!["uninstall", "optional"].includes(it.safety) || !["app", "appdata", "dev"].includes(it.cat)) return [];
+  return (DATA.apps[it.group] || []).map((u, i) => [i, u]).slice(0, 4);
+}
+function settingsFor(text, skipApps) {
+  return SETTINGS_LINKS.filter(([rx, key]) => rx.test(text) && !(key === "apps" && skipApps));
+}
+function actBtn(act, label, cls, data) {
+  const attrs = Object.entries(data || {}).map(([k, v]) => ` data-${k}="${esc(v)}"`).join("");
+  return `<button class="btn${cls ? " " + cls : ""}" type="button" data-act="${act}"${attrs}>${label}</button>`;
+}
+function actionBar(it) {
+  const btns = [];
+  const paths = targetsOf(it);
+  const done = itemState(it);
+  if (isRecycleBin(it)) {
+    if (!done) btns.push(actBtn("empty-bin", `${ICONS.trash}Empty Recycle Bin…`, "danger"));
+  } else if (canDeleteItem(it)) {
+    const n = paths.length;
+    btns.push(actBtn("delete", `${ICONS.trash}${n > 1 ? `Delete these ${n} folders…` : "Delete…"}`, "danger", { id: it.id }));
+  }
+  const uninstallers = uninstallersFor(it);
+  for (const [i, u] of uninstallers) btns.push(actBtn("uninstall", `${ICONS.unbox}Uninstall ${esc(u.name)}…`, "danger", { group: it.group, index: i }));
+  if (paths.length === 1 && it.kind !== "hidden" && !(done && done.state !== "partial")) btns.push(actBtn("explore", `${ICONS.folder}Open in Explorer`, "", { path: paths[0] }));
+  for (const [, key, label] of settingsFor(`${it.action || ""} ${it.desc || ""}`, uninstallers.length > 0)) btns.push(actBtn("settings", `${ICONS.out}${label}`, "", { key }));
+  if (WAITING.has(it.group)) btns.push(`<span class="meta">Waiting for the uninstaller…</span>`);
+  if (!btns.length) return "";
+  return `<div class="acts">${btns.join("")}</div>`;
+}
+function groupActs(main) {
+  if (!APP || !main.group) return "";
+  if (WAITING.has(main.group)) return `<div class="group-acts acts"><span class="spin" aria-hidden="true"></span><span class="meta">Waiting for the uninstaller to finish…</span></div>`;
+  if (GONE_APPS.has(main.group)) return `<div class="group-acts acts"><span class="tag ok">Uninstalled</span><span class="meta">Its leftover folders below can now be deleted. Scan again to see what it freed.</span></div>`;
+  const list = uninstallersFor(main);
+  if (!list.length) return "";
+  return `<div class="group-acts acts">${list.map(([i, u]) => actBtn("uninstall", `${ICONS.unbox}Uninstall ${esc(u.name)}…`, "danger", { group: main.group, index: i })).join("")}<span class="meta">Starts its uninstaller, as Settings → Apps does.</span></div>`;
+}
+function rowActs(path, opts) {
+  if (!APP) return "";
+  if (opts.done && opts.done.state !== "partial") return "<span></span>";
+  const name = baseName(path);
+  const del = opts.del && !isProtected(path)
+    ? `<button class="ib del" type="button" data-act="delete" data-path="${esc(path)}"${opts.id != null ? ` data-id="${opts.id}"` : ""}${opts.contents ? ' data-contents="1"' : ""}${opts.file ? ' data-file="1"' : ""}${opts.dup ? ' data-dup="1"' : ""} data-size="${opts.size || 0}" title="Delete…" aria-label="Delete ${esc(name)}">${ICONS.trash}</button>` : "";
+  return `<span class="racts"><button class="ib" type="button" data-act="explore" data-path="${esc(path)}" title="Show in File Explorer" aria-label="Show ${esc(name)} in File Explorer">${ICONS.folder}</button>${del}</span>`;
+}
+
+// -- header pieces
+function renderTools() {
+  let box = document.getElementById("app-tools");
+  if (!box) {
+    box = document.createElement("div"); box.id = "app-tools"; box.className = "tools";
+    document.getElementById("tools").prepend(box);
+  }
+  const scanning = SCAN && SCAN.running;
+  const drives = APP.drives.length > 1
+    ? `<select class="drive" id="drive" aria-label="Drive"${scanning ? " disabled" : ""}>${APP.drives.map(d =>
+      `<option value="${esc(d.drive)}"${d.drive === APP.drive ? " selected" : ""}>${esc(d.drive)} · ${esc(size(d.total))}</option>`).join("")}</select>` : "";
+  box.innerHTML = drives + `<button class="btn primary" type="button" data-act="scan"${scanning ? " disabled" : ""}>${ICONS.scan}${scanning ? "Scanning…" : DATA ? "Scan again" : "Scan " + esc(APP.drive)}</button>`;
+}
+function renderFreed() {
+  const el = document.getElementById("hero-note");
+  if (!APP || !DATA || FREED <= 0) { el.innerHTML = ""; return; }
+  el.innerHTML = `<span class="freed">${ICONS.check}You freed ${esc(size(FREED))} since this scan${APP.usage ? ` · ${esc(size(APP.usage.free))} free now` : ""}</span>`;
+}
+function renderEmpty() {
+  const u = APP.usage || { total: 0, used: 0, free: 0 };
+  document.getElementById("title").textContent = APP.drive + " drive";
+  document.getElementById("meta").textContent = "Not scanned yet";
+  document.getElementById("hero-num").textContent = size(u.used);
+  document.getElementById("hero-sub").innerHTML = `used of ${esc(size(u.total))} · <b>${esc(size(u.free))} free</b>`;
+  const bar = document.getElementById("segbar");
+  bar.setAttribute("aria-label", `Drive ${APP.drive}: ${size(u.used)} used, ${size(u.free)} free`);
+  bar.innerHTML = `<div class="seg" tabindex="0" data-name="Used" data-value="${u.used}" style="flex:${u.used} 1 0;background:var(--c-other);color:var(--on-other)"><span class="lbl">${pct(u.used, u.total)}</span></div>` +
+    `<div class="seg free" tabindex="0" data-name="Free space" data-value="${u.free}" style="flex:${u.free} 1 0"><span class="lbl">${esc(size(u.free))} free</span></div>`;
+  document.getElementById("legend").innerHTML = `<li><span class="sw" style="background:var(--c-other)"></span>Used</li><li><span class="sw" style="background:var(--track)"></span>Free space</li>`;
+  fitLabels();
+  bindTips(bar, u.total, u.used);
+  document.getElementById("bar-row").hidden = true;
+  const scanning = SCAN && SCAN.running;
+  document.getElementById("main").innerHTML = `<div class="card"><div class="empty-state">
+    <h2>See what's filling ${esc(APP.drive)}</h2>
+    <p>The scan reads the names, sizes and dates of the files on ${esc(APP.drive)} and Windows' list of installed apps, then explains what each thing is and whether it can go. It takes one to three minutes and changes nothing.</p>
+    <button class="btn primary" type="button" data-act="scan"${scanning ? " disabled" : ""}>${ICONS.scan}${scanning ? "Scanning…" : "Scan " + esc(APP.drive) + " now"}</button></div></div>`;
+}
+
+// -- scanning
+async function startScan() {
+  const r = await api().scan(APP.drive);
+  if (!r.ok) { toast(esc(r.error), "bad"); return; }
+  SCAN = { running: true, drive: APP.drive, stage: "apps", text: "Starting...", files: 0, folders: 0, seconds: 0 };
+  renderBanner(); renderTools();
+  if (!DATA) renderEmpty();
+  pollScan();
+}
+let scanTimer = 0;
+async function pollScan() {
+  clearTimeout(scanTimer);
+  SCAN = await api().scan_status();
+  renderBanner();
+  if (SCAN.running) { scanTimer = setTimeout(pollScan, 400); return; }
+  renderTools();
+  if (SCAN.finished) {
+    state.open.clear(); state.more.clear(); state.query = ""; document.getElementById("search").value = "";
+    applyState(await api().state(SCAN.drive));
+    toast(`Scan of ${esc(SCAN.drive)} finished. This is the new report.`, "good");
+  } else if (SCAN.cancelled) {
+    if (!DATA) renderEmpty();
+    toast("Scan cancelled. Nothing was changed.");
+  } else if (SCAN.error) {
+    if (!DATA) renderEmpty();
+    toast(esc(SCAN.error), "bad");
+  }
+  SCAN = null; renderBanner(); renderTools();
+}
+const STAGE_AT = { apps: 0.02, windows: 0.9, store: 0.93, explain: 0.96, dupes: 0.98 };
+function renderBanner() {
+  const el = document.getElementById("banner");
+  const s = SCAN;
+  if (!s || !s.running) { el.hidden = true; el.innerHTML = ""; return; }
+  // walking the drive: compared with the last scan's files and folders when there is one, else with bytes
+  const walked = s.expected ? ((s.files || 0) + (s.folders || 0)) / s.expected : s.used ? (s.counted || 0) / s.used : 0;
+  const frac = s.stage in STAGE_AT ? STAGE_AT[s.stage] : 0.03 + 0.85 * Math.min(1, walked);
+  const secs = s.seconds || 0;
+  const clock = Math.floor(secs / 60) + ":" + String(secs % 60).padStart(2, "0");
+  const what = s.stage === "scan" ? `${fmtInt(s.files || 0)} files in ${fmtInt(s.folders || 0)} folders` : (s.text || "");
+  if (!el.firstElementChild) {
+    el.innerHTML = `<div class="card"><div class="banner-row"><span class="spin" aria-hidden="true"></span>
+      <div class="grow"><b id="scan-title"></b><span class="sub" id="scan-sub"></span></div>
+      <button class="btn" type="button" data-act="cancel-scan">Cancel</button></div>
+      <div class="progress" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100"><i></i></div>
+      <div class="meta" id="scan-note"></div></div>`;
+  }
+  el.hidden = false;
+  el.querySelector("#scan-title").textContent = `Scanning ${s.drive}…`;
+  el.querySelector("#scan-sub").textContent = `${what} · ${clock}`;
+  el.querySelector("#scan-note").textContent = "The scan only reads your drive." + (DATA ? " You can keep using the last report meanwhile." : "");
+  const bar = el.querySelector(".progress");
+  bar.setAttribute("aria-valuenow", Math.round(frac * 100));
+  bar.firstElementChild.style.width = (frac * 100).toFixed(1) + "%";
+}
+
+// -- dialogs and messages
+const dlg = document.getElementById("dlg");
+dlg.addEventListener("cancel", e => { if (BUSY) e.preventDefault(); });
+function openDialog(html) {
+  dlg.innerHTML = html;
+  if (!dlg.open) dlg.showModal();
+  const first = dlg.querySelector("[autofocus]");
+  if (first) first.focus();
+}
+function closeDialog() { BUSY = false; PENDING = null; if (dlg.open) dlg.close(); }
+function dialogBusy(text) {
+  BUSY = true;
+  const foot = dlg.querySelector(".dlg-foot");
+  if (!foot) return;
+  foot.querySelectorAll("button").forEach(b => { b.disabled = true; });
+  let note = foot.querySelector(".dlg-busy");
+  if (!note) { note = document.createElement("div"); note.className = "dlg-busy"; foot.prepend(note); }
+  note.innerHTML = `<span class="spin" aria-hidden="true"></span><span>${esc(text)}</span>`;
+}
+function warnLine(html, icon) { return `<p class="dlg-warn">${icon || ICONS.warn}<span>${html}</span></p>`; }
+function toast(html, kind, opts = {}) {
+  const el = document.createElement("div");
+  el.className = "toast" + (kind ? " " + kind : "");
+  el.setAttribute("role", kind === "bad" ? "alert" : "status");
+  el.innerHTML = `<div class="grow">${html}${opts.actions ? `<div class="acts">${opts.actions}</div>` : ""}</div>` +
+    `<button class="ib" type="button" aria-label="Dismiss" data-dismiss>✕</button>`;
+  el.querySelector("[data-dismiss]").addEventListener("click", () => el.remove());
+  el.addEventListener("click", e => { if (e.target.closest("[data-act]")) setTimeout(() => el.remove(), 0); });
+  document.getElementById("toasts").appendChild(el);
+  if (!opts.sticky) setTimeout(() => el.remove(), opts.ms || (opts.actions ? 12000 : 7000));
+  return el;
+}
+async function pollTask(id, onProgress, every = 300) {
+  for (;;) {
+    const t = await api().task(id);
+    if (t.done) return t.result || { ok: false, error: "The task ended without a result." };
+    if (onProgress && t.progress) onProgress(t.progress);
+    await sleep(every);
+  }
+}
+
+// -- the actions
+async function act(el) {
+  const d = el.dataset;
+  switch (d.act) {
+    case "scan": return startScan();
+    case "cancel-scan": return api().cancel_scan();
+    case "explore": return explore(d.path);
+    case "settings": return openSettings(d.key);
+    case "delete": return askDelete(el);
+    case "do-delete": return doDelete(d.mode);
+    case "admin-delete": return doDeleteAsAdmin();
+    case "empty-bin": return askEmptyBin();
+    case "do-empty-bin": return doEmptyBin();
+    case "uninstall": return askUninstall(d.group, +d.index);
+    case "do-uninstall": return doUninstall();
+    case "stop-task": return api().stop_task(d.task);
+    case "run": return askRun(d.cmd);
+    case "do-run": return doRun();
+    case "close": return closeDialog();
+  }
+}
+async function explore(path) {
+  const r = await api().reveal(path);
+  if (r && r.missing) toast(`It's no longer there${r.opened ? ", so the closest folder opened instead" : ""}.`);
+}
+async function openSettings(key) {
+  const r = await api().open_settings(key);
+  if (r && r.error) toast(esc(r.error), "bad");
+}
+document.addEventListener("change", async e => {
+  if (e.target.id !== "drive") return;
+  state.open.clear(); state.more.clear(); state.query = ""; state.tab = "overview";
+  document.getElementById("search").value = "";
+  applyState(await api().state(e.target.value));
+});
+
+async function askDelete(el) {
+  const d = el.dataset;
+  const it = d.id != null ? BY_ID.get(+d.id) : null;
+  const whole = d.path == null;
+  const paths = whole ? targetsOf(it) : [d.path];
+  const contents = whole ? it.cat === "cache" : d.contents === "1";
+  const ctx = {
+    it, paths, contents, dup: d.dup === "1", file: d.file === "1",
+    label: whole ? it.name : baseName(d.path), size: whole ? it.size : +d.size || 0,
+    safety: it ? it.safety : "review",
+  };
+  openDialog(`<div class="dlg-body"><h3 id="dlg-title">Delete “${esc(ctx.label)}”?</h3><div class="dlg-busy"><span class="spin" aria-hidden="true"></span><span>Checking…</span></div></div>`);
+  const check = await api().check(APP.drive, paths, contents);
+  if (!check.ok) {
+    openDialog(`<div class="dlg-body"><h3 id="dlg-title">Disk Report won't delete this</h3>
+      <p>${esc(check.reason)}</p><div class="dlg-facts"><div class="path">${esc(check.path || paths[0])}</div></div></div>
+      <div class="dlg-foot">${actBtn("explore", `${ICONS.folder}Open in Explorer`, "", { path: check.path || paths[0] })}
+      <button class="btn primary" type="button" data-act="close" autofocus>OK</button></div>`);
+    return;
+  }
+  PENDING = ctx;
+  const trashFirst = ctx.dup || !["safe", "optional"].includes(ctx.safety);
+  const what = contents
+    ? (paths.length > 1
+      ? `Everything inside these ${paths.length} folders is deleted. The folders themselves stay, and the app fills them again when it needs to.`
+      : "Everything inside this folder is deleted. The folder itself stays, and the app fills it again when it needs to.")
+    : paths.length > 1 ? `These ${paths.length} folders and everything in them are deleted.`
+    : ctx.file ? "This file is deleted." : "This folder and everything in it are deleted.";
+  const warns = [];
+  if (ctx.safety === "optional" && it && it.action) warns.push(warnLine(`<b>The trade-off:</b> ${rich(it.action)}`));
+  if (ctx.safety === "unknown") warns.push(warnLine("Disk Report doesn't know what this is. Make sure nothing you use needs it."));
+  if (ctx.dup) warns.push(warnLine("Keep at least one copy. Check that this isn't the copy you use, or a backup you made on purpose.", ICONS.info));
+  if (check.keepNames && check.keepNames.length) warns.push(warnLine(`Inside it, Disk Report leaves ${esc(check.keepNames.join(", "))} alone (needed by Windows or by an installed app).`, ICONS.lock));
+  if (check.sync && check.sync.length) warns.push(warnLine(`It's synced with ${esc(check.sync.join(", "))}: deleting it here deletes it there too. To keep it online only, right-click it in File Explorer and choose “Free up space” instead.`));
+  if (check.missing && check.missing.length === paths.length) warns.push(warnLine("It's already gone from the drive.", ICONS.info));
+  openDialog(`<div class="dlg-body">
+      <h3 id="dlg-title">Delete “${esc(ctx.label)}”?</h3>
+      <div class="dlg-facts">${paths.slice(0, 8).map(p => `<div class="path">${esc(p)}</div>`).join("")}${paths.length > 8 ? `<div class="meta">and ${fmtInt(paths.length - 8)} more</div>` : ""}</div>
+      <div class="dlg-line"><b>${esc(size(ctx.size))}</b><span>at the last scan</span>${badge(ctx.safety)}</div>
+      <p>${esc(what)}</p>
+      ${warns.join("")}
+      <p class="dlg-hint">Recycle Bin: you can restore it, and the space is freed when you empty the Recycle Bin. Delete permanently: the space is freed now.</p>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn" type="button" data-act="close" autofocus>Cancel</button>
+      <button class="btn${trashFirst ? " primary" : ""}" type="button" data-act="do-delete" data-mode="trash">Move to Recycle Bin</button>
+      <button class="btn danger${trashFirst ? "" : " solid"}" type="button" data-act="do-delete" data-mode="forever">${ICONS.trash}Delete permanently</button>
+    </div>`);
+}
+async function doDelete(mode) {
+  const ctx = PENDING;
+  if (!ctx) return;
+  dialogBusy(mode === "trash" ? "Moving to the Recycle Bin…" : "Deleting…");
+  const r = await api().delete(APP.drive, ctx.paths, mode, ctx.contents);
+  if (!r.ok) { closeDialog(); toast(esc(r.error), "bad"); return; }
+  const res = await pollTask(r.task, p => dialogBusy(`Deleting… ${plural(p.files, "file", "files")} · ${size(p.freed)} freed`));
+  closeDialog();
+  afterDelete(ctx, res);
+}
+async function doDeleteAsAdmin() {
+  const ctx = LAST_DELETE;
+  if (!ctx) return;
+  const r = await api().delete_as_admin(APP.drive, ctx.paths, ctx.contents);
+  if (!r.ok) { toast(esc(r.error), "bad"); return; }
+  const wait = toast("Windows asks for administrator rights, then the rest is deleted…", "wait", { sticky: true });
+  const res = await pollTask(r.task, null, 500);
+  wait.remove();
+  if (res.cancelled) { toast("Cancelled: Windows didn't get administrator rights."); return; }
+  afterDelete(ctx, res);
+}
+function afterDelete(ctx, res) {
+  if (res.ok === false && res.error) { toast(esc(res.error), "bad"); return; }
+  applyRecord(res);
+  if (res.usage) APP.usage = res.usage;
+  render(); renderFreed();
+  const name = `<b>${esc(ctx.label)}</b>`;
+  const states = (res.paths || []).map(p => p.state);
+  const all = s => states.length && states.every(x => x === s);
+  let msg, kind = "good", actions = "";
+  if (res.cancelled) { msg = "Cancelled. What was already moved stays in the Recycle Bin."; kind = ""; }
+  else if (res.mode === "trash" && all("trashed")) {
+    msg = `Moved ${name} to the Recycle Bin. The space is freed when you empty the Recycle Bin.`;
+    actions = actBtn("empty-bin", "Empty Recycle Bin…", "");
+  } else if (all("deleted") || all("emptied")) {
+    msg = `Deleted ${name} · freed ${esc(size(res.freed))}.`;
+  } else {
+    kind = states.every(s => s === "failed") ? "bad" : "";
+    msg = res.freed ? `Deleted part of ${name} · freed ${esc(size(res.freed))}.` : `${name} wasn't deleted.`;
+    if (res.inUse) msg += ` ${plural(res.inUse, "file is", "files are")} in use: close the app that uses ${res.inUse === 1 ? "it" : "them"}, then try again.`;
+    if (res.denied) {
+      msg += ` ${plural(res.denied, "item needs", "items need")} administrator rights.`;
+      if (!res.admin) { LAST_DELETE = ctx; actions = actBtn("admin-delete", "Delete the rest as administrator", ""); }
+    }
+    if (res.errors && res.errors.length) msg += " " + esc(res.errors[0]);
+  }
+  if (res.kept) msg += ` Left alone: ${plural(res.kept, "part", "parts")} that Windows or an installed app needs.`;
+  toast(msg, kind, { actions });
+}
+
+async function askEmptyBin() {
+  const info = await api().bin_info(APP.drive);
+  if (!info || !info.items) { toast(`The Recycle Bin on ${esc(APP.drive)} is already empty.`, "good"); return; }
+  PENDING = { bin: true };
+  openDialog(`<div class="dlg-body"><h3 id="dlg-title">Empty the Recycle Bin?</h3>
+      <p>The Recycle Bin on ${esc(APP.drive)} holds <b>${esc(size(info.size))}</b> in ${plural(info.items, "item", "items")}. Emptying it deletes them for good.</p></div>
+    <div class="dlg-foot"><button class="btn" type="button" data-act="close" autofocus>Cancel</button>
+      ${actBtn("do-empty-bin", `${ICONS.trash}Empty Recycle Bin`, "danger solid")}</div>`);
+}
+async function doEmptyBin() {
+  dialogBusy("Emptying the Recycle Bin…");
+  const r = await api().empty_bin(APP.drive);
+  const res = await pollTask(r.task);
+  closeDialog();
+  if (!res.ok) { toast(esc(res.error || "The Recycle Bin wasn't emptied."), "bad"); return; }
+  applyRecord(Object.assign({ kind: "empty-bin" }, res));
+  if (res.usage) APP.usage = res.usage;
+  render(); renderFreed();
+  toast(`Emptied the Recycle Bin · freed ${esc(size(res.freed))}.`, "good");
+}
+
+function askUninstall(group, index) {
+  const u = ((DATA.apps || {})[group] || [])[index];
+  if (!u) return;
+  PENDING = { group, index, u };
+  const how = u.kind === "store"
+    ? `Disk Report removes the Microsoft Store app ${esc(u.name)} for your account, as Settings → Apps does.`
+    : `Disk Report starts ${esc(u.name)}'s own uninstaller, as Settings → Apps does. Follow its steps: Disk Report notices when the app is gone.`;
+  openDialog(`<div class="dlg-body"><h3 id="dlg-title">Uninstall ${esc(u.name)}?</h3>
+      <p>${how}</p>
+      ${warnLine("Its settings, data and caches may stay behind. Once it's uninstalled, you can delete them from this report.", ICONS.info)}</div>
+    <div class="dlg-foot"><button class="btn" type="button" data-act="close" autofocus>Cancel</button>
+      ${actBtn("do-uninstall", `${ICONS.unbox}Uninstall`, "danger solid")}</div>`);
+}
+async function doUninstall() {
+  const p = PENDING;
+  if (!p) return;
+  closeDialog();
+  const r = await api().uninstall(APP.drive, p.group, p.index);
+  if (!r.ok) { toast(esc(r.error), "bad"); return; }
+  WAITING.add(p.group); render();
+  const wait = toast(`Waiting for ${esc(p.u.name)} to be uninstalled. Follow the uninstaller's steps.`, "wait",
+    { sticky: true, actions: actBtn("stop-task", "Stop waiting", "", { task: r.task }) });
+  const res = await pollTask(r.task, null, 1000);
+  wait.remove();
+  WAITING.delete(p.group);
+  if (res.state === "removed") {
+    GONE_APPS.add(p.group);
+    toast(`Uninstalled <b>${esc(p.u.name)}</b>. Its leftover folders can now be deleted here. Scan again to see what it freed.`, "good", { actions: actBtn("scan", `${ICONS.scan}Scan again`, "") });
+  } else if (res.state === "cancelled") toast("Uninstall cancelled.");
+  else if (res.state === "stopped") toast(`Stopped waiting. If you finished uninstalling ${esc(p.u.name)}, scan again to update the report.`);
+  else toast(esc(res.error || "The uninstall didn't work."), "bad");
+  if (res.usage) APP.usage = res.usage;
+  render(); renderFreed();
+}
+
+function askRun(cmd) {
+  PENDING = { cmd };
+  const admin = APP.commands[cmd];
+  openDialog(`<div class="dlg-body"><h3 id="dlg-title">Run this command?</h3>
+      <div class="dlg-facts"><code>${esc(cmd)}</code></div>
+      <p>It opens a terminal window and runs there, so you can follow it and answer if it asks something. Close the window when it's done.</p>
+      ${admin ? warnLine("Windows will ask for administrator rights.", ICONS.lock) : ""}</div>
+    <div class="dlg-foot"><button class="btn" type="button" data-act="close" autofocus>Cancel</button>
+      ${actBtn("do-run", `${ICONS.run}Run`, "primary")}</div>`);
+}
+async function doRun() {
+  const p = PENDING;
+  if (!p) return;
+  closeDialog();
+  const r = await api().run_command(p.cmd);
+  if (r.ok) toast("Started in a terminal window. Scan again afterwards to see the space it freed.", "good");
+  else if (!r.cancelled) toast(esc(r.error), "bad");
+}
+
+// ------------------------------------------------------------------ start
+if (EMBEDDED) {
+  load(EMBEDDED);
+  renderHeader();
+  render();
+  renderFoot();
+} else {
+  document.getElementById("title").textContent = "Disk Report";
+  document.getElementById("bar-row").hidden = true;
+  whenApp(startApp);
+}
 </script>
 </body>
 </html>

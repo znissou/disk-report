@@ -779,3 +779,35 @@ ARTIFACTS = {
     "__pycache__": ("build", None), ".pytest_cache": ("build", None), ".mypy_cache": ("build", None),
     ".ruff_cache": ("build", None), ".tox": ("build", None),
 }
+
+# Commands from the texts above that the app may run for you, in a terminal window you can watch and answer.
+# Only these exact commands get a Run button. The others need a project folder or a name you fill in, so they
+# stay copy-only. The value says whether the command needs administrator rights.
+COMMANDS = {
+    "npm cache clean --force": False,
+    "yarn cache clean": False,
+    "pnpm store prune": False,
+    "bun pm cache rm": False,
+    "py -m pip cache purge": False,
+    "uv cache clean": False,
+    "conda clean --all": False,
+    "poetry cache clear --all pypi": False,
+    "composer clear-cache": False,
+    "dotnet nuget locals all --clear": False,
+    "go clean -cache": False,
+    "go clean -modcache": False,
+    "flutter pub cache clean": False,
+    "huggingface-cli delete-cache": False,
+    "npx playwright uninstall --all": False,
+    "docker system df": False,
+    "docker system prune": False,
+    "npm ls -g --depth=0": False,
+    "py -m pip list --user": False,
+    "ollama list": False,
+    "rustup toolchain list": False,
+    "uv python list --only-installed": False,
+    "wsl --list -v": False,
+    "powercfg /h off": True,
+    "powercfg /h /type reduced": True,
+    "DISM /Online /Cleanup-Image /StartComponentCleanup": True,
+}
