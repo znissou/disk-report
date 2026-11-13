@@ -31,7 +31,10 @@ for each item:
   to remove, keep, or unknown
 - **how to clean it**: the exact setting, menu or command, with a Copy button
 
-![Overview of a disk report](docs/overview.png)
+…and gives you a button to do it right there: delete, uninstall, or run the cleaning command, one item
+at a time.
+
+![Disk Report showing the latest scan of the C: drive](docs/app-window.png)
 
 <sub>Screenshots in this README use made-up data.</sub>
 
@@ -62,6 +65,8 @@ Open any item to see what it is, and act on it right there, one thing at a time:
 - **Run** a cleaning command from the catalog (`npm cache clean --force`, `docker system prune`,
   `powercfg /h off`…) in a terminal window you can follow and answer.
 - **Empty the Recycle Bin**, or open the Windows Settings page an item talks about.
+
+![Deleting asks first and says exactly what happens](docs/delete-dialog.png)
 
 What the app never does:
 
@@ -95,12 +100,14 @@ To run the app from source: `py -m pip install -r requirements.txt`, then `py ap
 ## What's in the report
 
 **Every item explains itself.** Open any row to see what it is, what to do about it, what's
-inside, which file types it holds, how old they are, and its biggest files.
+inside, which file types it holds, how old they are, and its biggest files. Each file and folder
+listed has a button to show it in File Explorer and one to delete it.
 
 ![An item opened in the report: Downloads](docs/item-details.png)
 
 **Apps come with their data.** Each app shows its program files plus the settings, caches and
-downloads it keeps elsewhere, so you know what uninstalling it would free.
+downloads it keeps elsewhere, so you know what uninstalling it would free, and an Uninstall button
+next to it.
 
 ![Apps grouped with their data](docs/apps.png)
 
@@ -123,7 +130,7 @@ It also finds:
 
 Light and dark themes follow your Windows setting.
 
-![The report in dark mode](docs/overview-dark.png)
+![The report in light mode](docs/overview.png)
 
 ## Safety labels
 
