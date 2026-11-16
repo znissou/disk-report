@@ -36,7 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import catalog as K  # noqa: E402
 
-VERSION = "2.0"
+VERSION = "2.0.1"
 # next to this file, or inside the app when it's packaged with PyInstaller
 TEMPLATE = os.path.join(getattr(sys, "_MEIPASS", HERE), "report_template.html")
 MB = 1024 ** 2
