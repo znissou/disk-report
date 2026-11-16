@@ -300,6 +300,8 @@ dialog.dlg::backdrop { background: rgba(0, 0, 0, .38); }
 .dlg-line b { color: var(--ink); font-weight: 600; }
 .dlg-warn { display: flex; gap: 8px; align-items: flex-start; margin: 0; color: var(--ink); font-size: 13px; }
 .dlg-warn svg { flex: none; margin-top: 2px; }
+.dlg-list { margin: 4px 0 0; padding-left: 18px; color: var(--ink-2); display: grid; gap: 2px; overflow-wrap: anywhere; }
+.dlg-list b { color: var(--ink); font-weight: 600; }
 .dlg-hint { font-size: 12px; color: var(--muted); }
 .dlg-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 22px;
   border-top: 1px solid var(--border); background: var(--surface-2); }
@@ -405,6 +407,7 @@ const ICONS = {
 // ------------------------------------------------------------------ helpers
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 function size(n) {
+  if (!(n > 0)) return "0 KB";
   if (n >= 100 * GB) return Math.round(n / GB) + " GB";
   if (n >= GB) return (n / GB).toFixed(1) + " GB";
   if (n >= MB) return Math.round(n / MB) + " MB";
@@ -874,10 +877,11 @@ function renderFoot() {
 // ================================================================== the app
 // Everything below runs only inside the Disk Report app, where window.pywebview.api reaches the Python side.
 let APP = null;               // what the app told us: drives, the scan's id, the cleaning commands it may run…
-let DONE = new Map();         // lower-case path -> {state} for what was deleted since this scan
-let GONE_APPS = new Set();    // app groups uninstalled since this scan
-let WAITING = new Set();      // app groups whose uninstaller is running
+let DONE = new Map();         // lower-case path -> {state} for what was deleted since this scan ("left": left alone)
+let REMOVED = new Map();      // app group -> Set of its programs (indexes in DATA.apps[group]) uninstalled since
+let WAITING = new Map();      // app group -> name of the program whose uninstaller is running
 let PROTECTED = new Set();    // folders the app never deletes whole (Documents, AppData…)
+let LOCKED = [];              // folders in which the app deletes nothing at all: other accounts' folders
 let FREED = 0;                // bytes freed since this scan
 let PENDING = null;           // what the open dialog is about
 let BUSY = false;             // a dialog is working: Escape doesn't close it
@@ -913,34 +917,56 @@ async function startApp() {
 function applyState(st) {
   APP = st;
   PROTECTED = new Set(st.protected || []);
-  DONE = new Map(); GONE_APPS = new Set(); FREED = 0;
-  for (const r of st.done || []) applyRecord(r);
+  LOCKED = st.locked || [];
   if (st.theme) { document.documentElement.dataset.theme = st.theme; paintThemeButton(); }
-  if (st.scan) {
-    load(st.scan);
+  if (st.scan) load(st.scan);
+  else { DATA = null; M = null; ITEMS = []; BY_ID = new Map(); }
+  // what was done since this scan: after load(), as the records name the scan's paths and apps
+  DONE = new Map(); REMOVED = new Map(); FREED = 0;
+  for (const r of st.done || []) applyRecord(r);
+  if (DATA) {
     document.getElementById("bar-row").hidden = false;
     renderHeader(); render();
-  } else {
-    DATA = null; M = null; ITEMS = []; BY_ID = new Map();
-    renderEmpty();
-  }
+  } else renderEmpty();
   renderFreed(); renderFoot(); renderTools();
 }
 function applyRecord(r) {
   if (r.kind === "delete") {
     for (const p of r.paths || []) if (p.state !== "failed") DONE.set(p.path.toLowerCase(), { state: p.state });
+    for (const p of r.inner || []) DONE.set(p.path.toLowerCase(), { state: p.state });   // listed things that went too
+    for (const p of r.untouched || []) DONE.set(p.toLowerCase(), { state: "left" });     // and those left alone
     FREED += r.freed || 0;
   } else if (r.kind === "empty-bin" && r.ok) {
     FREED += r.freed || 0;
-    if (M) DONE.set((M.drive + "\\$recycle.bin").toLowerCase(), { state: "emptied" });
+    const drive = r.drive || (M && M.drive);
+    if (drive) DONE.set((drive + "\\$recycle.bin").toLowerCase(), { state: "emptied" });
   } else if (r.kind === "uninstall" && r.state === "removed") {
-    GONE_APPS.add(r.group);
+    markRemoved(r);
   }
+}
+// -- uninstalled programs: one app group can hold several (NVIDIA, Python…)
+function programsOf(group) { return (DATA && DATA.apps && DATA.apps[group]) || []; }
+function removedIn(group) { return REMOVED.get(group) || new Set(); }
+function markRemoved(r) {
+  const list = programsOf(r.group), set = new Set(removedIn(r.group));
+  if (r.index != null && r.index < list.length) set.add(r.index);
+  else list.forEach((u, i) => { if (u.name === r.name) set.add(i); });   // Disk Report 2.0 logged no index
+  REMOVED.set(r.group, set);
+}
+// every program Disk Report could uninstall in this group is gone, so its folders are leftovers
+function groupGone(group) {
+  const list = programsOf(group), done = removedIn(group);
+  return list.length > 0 && list.every((_, i) => done.has(i));
+}
+function stillInstalled(group) {
+  const done = removedIn(group);
+  return programsOf(group).filter((_, i) => !done.has(i)).map(u => u.name);
 }
 
 // -- what each item and row can do
 const targetsOf = it => it.targets || it.paths || [];
-const isProtected = p => PROTECTED.has(p.toLowerCase().replace(/\\+$/, ""));
+const isLocked = p => { const key = p.toLowerCase(); return LOCKED.some(f => key === f || key.startsWith(f + "\\")); };
+const isProtected = p => PROTECTED.has(p.toLowerCase().replace(/\\+$/, "")) || isLocked(p);
 const isRecycleBin = it => (it.paths || []).some(p => /^[a-z]:\\\$recycle\.bin$/i.test(p));
 function pathState(p) {
   if (!APP || !DONE.size || !p) return null;
@@ -949,6 +975,7 @@ function pathState(p) {
   for (;;) {
     const s = DONE.get(key);
     if (s) {
+      if (s.state === "left") return null;                // left alone on purpose: as it was
       if (key === own) return s;
       if (s.state === "partial") return null;            // inside a folder that's only partly gone: unknown
       return { state: s.state === "trashed" ? "trashed" : "deleted" };
@@ -971,19 +998,24 @@ function stateTag(it, done) {
   if (!APP) return "";
   if (done) return doneTag(done);
   // an uninstall removes the program; whether its data and caches went too, only the next scan can tell
-  if (it.group && it.cat === "app" && (GONE_APPS.has(it.group) || WAITING.has(it.group))) return groupTag(it.group);
+  if (!it.group || it.cat !== "app") return "";
+  if (WAITING.get(it.group) === it.name) return ` <span class="tag busy">Uninstalling…</span>`;
+  const program = programsOf(it.group).findIndex(u => u.name === it.name);
+  if (groupGone(it.group) || (program >= 0 && removedIn(it.group).has(program))) return ` <span class="tag ok">Uninstalled</span>`;
   return "";
 }
 function groupTag(group) {
   if (!APP) return "";
   if (WAITING.has(group)) return ` <span class="tag busy">Uninstalling…</span>`;
-  if (GONE_APPS.has(group)) return ` <span class="tag ok">Uninstalled</span>`;
+  if (groupGone(group)) return ` <span class="tag ok">Uninstalled</span>`;
+  const done = removedIn(group).size;
+  if (done) return ` <span class="tag">${done} of ${programsOf(group).length} uninstalled</span>`;
   return "";
 }
 const doneTag = s => ` <span class="tag ${s.state === "partial" ? "" : "ok"}">${esc(STATE_LABEL[s.state])}</span>`;
 function rowDeletable(it) {
   if (!APP || it.container || it.kind === "hidden") return false;
-  return DELETABLE.has(it.safety) || (it.safety === "uninstall" && GONE_APPS.has(it.group));
+  return DELETABLE.has(it.safety) || (it.safety === "uninstall" && groupGone(it.group));
 }
 function canDeleteItem(it) {
   if (!rowDeletable(it) || isRecycleBin(it)) return false;
@@ -993,9 +1025,10 @@ function canDeleteItem(it) {
   return !done || done.state === "partial";
 }
 function uninstallersFor(it) {
-  if (!APP || !DATA || !DATA.apps || !it.group || GONE_APPS.has(it.group) || WAITING.has(it.group)) return [];
+  if (!APP || !DATA || !DATA.apps || !it.group || WAITING.has(it.group)) return [];
   if (!["uninstall", "optional"].includes(it.safety) || !["app", "appdata", "dev"].includes(it.cat)) return [];
-  return (DATA.apps[it.group] || []).map((u, i) => [i, u]).slice(0, 4);
+  const done = removedIn(it.group);
+  return programsOf(it.group).map((u, i) => [i, u]).filter(([i]) => !done.has(i)).slice(0, 4);
 }
 function settingsFor(text, skipApps) {
   return SETTINGS_LINKS.filter(([rx, key]) => rx.test(text) && !(key === "apps" && skipApps));
@@ -1024,11 +1057,14 @@ function actionBar(it) {
 }
 function groupActs(main) {
   if (!APP || !main.group) return "";
-  if (WAITING.has(main.group)) return `<div class="group-acts acts"><span class="spin" aria-hidden="true"></span><span class="meta">Waiting for the uninstaller to finish…</span></div>`;
-  if (GONE_APPS.has(main.group)) return `<div class="group-acts acts"><span class="tag ok">Uninstalled</span><span class="meta">Its leftover folders below can now be deleted. Scan again to see what it freed.</span></div>`;
+  if (WAITING.has(main.group)) return `<div class="group-acts acts"><span class="spin" aria-hidden="true"></span><span class="meta">Waiting for ${esc(WAITING.get(main.group))}'s uninstaller to finish…</span></div>`;
+  if (groupGone(main.group)) return `<div class="group-acts acts"><span class="tag ok">Uninstalled</span><span class="meta">Its leftover folders below can now be deleted. Scan again to see what it freed.</span></div>`;
   const list = uninstallersFor(main);
-  if (!list.length) return "";
-  return `<div class="group-acts acts">${list.map(([i, u]) => actBtn("uninstall", `${ICONS.unbox}Uninstall ${esc(u.name)}…`, "danger", { group: main.group, index: i })).join("")}<span class="meta">Starts its uninstaller, as Settings → Apps does.</span></div>`;
+  const removed = [...removedIn(main.group)].map(i => programsOf(main.group)[i].name);
+  if (!list.length && !removed.length) return "";
+  const note = (removed.length ? `Uninstalled: ${removed.map(esc).join(", ")}. ` : "") +
+    (list.length ? "Uninstall starts the program's own uninstaller, as Settings → Apps does." : "");
+  return `<div class="group-acts acts">${list.map(([i, u]) => actBtn("uninstall", `${ICONS.unbox}Uninstall ${esc(u.name)}…`, "danger", { group: main.group, index: i })).join("")}<span class="meta">${note}</span></div>`;
 }
 function rowActs(path, opts) {
   if (!APP) return "";
@@ -1148,12 +1184,23 @@ function dialogBusy(text) {
   BUSY = true;
   const foot = dlg.querySelector(".dlg-foot");
   if (!foot) return;
-  foot.querySelectorAll("button").forEach(b => { b.disabled = true; });
+  foot.querySelectorAll("button:not([data-act=stop-delete])").forEach(b => { b.disabled = true; });
   let note = foot.querySelector(".dlg-busy");
   if (!note) { note = document.createElement("div"); note.className = "dlg-busy"; foot.prepend(note); }
   note.innerHTML = `<span class="spin" aria-hidden="true"></span><span>${esc(text)}</span>`;
 }
+function dialogStop(task) {
+  // a permanent delete can be stopped between files; what's already deleted stays deleted
+  const note = dlg.querySelector(".dlg-foot .dlg-busy");
+  if (note) note.insertAdjacentHTML("afterend", actBtn("stop-delete", "Stop", "", { task }));
+}
 function warnLine(html, icon) { return `<p class="dlg-warn">${icon || ICONS.warn}<span>${html}</span></p>`; }
+function listLine(title, list, count, icon) {
+  // other things the report lists inside what's being deleted, with their size and label
+  const more = count > list.length ? `<li>and ${fmtInt(count - list.length)} more</li>` : "";
+  return `<div class="dlg-warn">${icon}<div><span>${title}</span><ul class="dlg-list">${list.map(e =>
+    `<li><b>${esc(e.name)}</b> · ${e.size != null ? esc(size(e.size)) + " · " : ""}${esc((SAFETY[e.safety] || SAFETY.unknown).label)}</li>`).join("")}${more}</ul></div></div>`;
+}
 function toast(html, kind, opts = {}) {
   const el = document.createElement("div");
   el.className = "toast" + (kind ? " " + kind : "");
@@ -1185,6 +1232,7 @@ async function act(el) {
     case "settings": return openSettings(d.key);
     case "delete": return askDelete(el);
     case "do-delete": return doDelete(d.mode);
+    case "stop-delete": el.disabled = true; el.textContent = "Stopping…"; return api().stop_task(d.task);
     case "admin-delete": return doDeleteAsAdmin();
     case "empty-bin": return askEmptyBin();
     case "do-empty-bin": return doEmptyBin();
@@ -1219,7 +1267,9 @@ async function askDelete(el) {
   const contents = whole ? it.cat === "cache" : d.contents === "1";
   const ctx = {
     it, paths, contents, dup: d.dup === "1", file: d.file === "1",
-    label: whole ? it.name : baseName(d.path), size: whole ? it.size : +d.size || 0,
+    label: whole ? it.name : baseName(d.path),
+    // everything under it at the last scan, other listed things inside included (a row's size already is that)
+    size: whole ? (it.raw || it.size) : +d.size || 0,
     safety: it ? it.safety : "review",
   };
   openDialog(`<div class="dlg-body"><h3 id="dlg-title">Delete “${esc(ctx.label)}”?</h3><div class="dlg-busy"><span class="spin" aria-hidden="true"></span><span>Checking…</span></div></div>`);
@@ -1231,8 +1281,10 @@ async function askDelete(el) {
       <button class="btn primary" type="button" data-act="close" autofocus>OK</button></div>`);
     return;
   }
+  ctx.check = check;
   PENDING = ctx;
   const trashFirst = ctx.dup || !["safe", "optional"].includes(ctx.safety);
+  const goes = Math.max(0, ctx.size - (check.staysSize || 0));   // what stays inside isn't part of it
   const what = contents
     ? (paths.length > 1
       ? `Everything inside these ${paths.length} folders is deleted. The folders themselves stay, and the app fills them again when it needs to.`
@@ -1243,13 +1295,15 @@ async function askDelete(el) {
   if (ctx.safety === "optional" && it && it.action) warns.push(warnLine(`<b>The trade-off:</b> ${rich(it.action)}`));
   if (ctx.safety === "unknown") warns.push(warnLine("Disk Report doesn't know what this is. Make sure nothing you use needs it."));
   if (ctx.dup) warns.push(warnLine("Keep at least one copy. Check that this isn't the copy you use, or a backup you made on purpose.", ICONS.info));
-  if (check.keepNames && check.keepNames.length) warns.push(warnLine(`Inside it, Disk Report leaves ${esc(check.keepNames.join(", "))} alone (needed by Windows or by an installed app).`, ICONS.lock));
+  if (check.also && check.also.length) warns.push(listLine("It also holds these, which the report lists on their own. They go with it:", check.also, check.alsoCount, ICONS.info));
+  if (check.leave && check.leave.length) warns.push(listLine("Left alone, because the report lists them on their own with a more careful label. Delete them from their own rows if you want to:", check.leave, check.leaveCount, ICONS.lock));
+  if (check.keep && check.keep.length) warns.push(listLine("Left alone, because Windows or an installed app needs them:", check.keep, check.keepCount, ICONS.lock));
   if (check.sync && check.sync.length) warns.push(warnLine(`It's synced with ${esc(check.sync.join(", "))}: deleting it here deletes it there too. To keep it online only, right-click it in File Explorer and choose “Free up space” instead.`));
   if (check.missing && check.missing.length === paths.length) warns.push(warnLine("It's already gone from the drive.", ICONS.info));
   openDialog(`<div class="dlg-body">
       <h3 id="dlg-title">Delete “${esc(ctx.label)}”?</h3>
       <div class="dlg-facts">${paths.slice(0, 8).map(p => `<div class="path">${esc(p)}</div>`).join("")}${paths.length > 8 ? `<div class="meta">and ${fmtInt(paths.length - 8)} more</div>` : ""}</div>
-      <div class="dlg-line"><b>${esc(size(ctx.size))}</b><span>at the last scan</span>${badge(ctx.safety)}</div>
+      <div class="dlg-line"><b>${esc(size(goes))}</b><span>at the last scan</span>${badge(ctx.safety)}</div>
       <p>${esc(what)}</p>
       ${warns.join("")}
       <p class="dlg-hint">Recycle Bin: you can restore it, and the space is freed when you empty the Recycle Bin. Delete permanently: the space is freed now.</p>
@@ -1266,6 +1320,7 @@ async function doDelete(mode) {
   dialogBusy(mode === "trash" ? "Moving to the Recycle Bin…" : "Deleting…");
   const r = await api().delete(APP.drive, ctx.paths, mode, ctx.contents);
   if (!r.ok) { closeDialog(); toast(esc(r.error), "bad"); return; }
+  if (mode === "forever") dialogStop(r.task);
   const res = await pollTask(r.task, p => dialogBusy(`Deleting… ${plural(p.files, "file", "files")} · ${size(p.freed)} freed`));
   closeDialog();
   afterDelete(ctx, res);
@@ -1289,15 +1344,30 @@ function afterDelete(ctx, res) {
   const name = `<b>${esc(ctx.label)}</b>`;
   const states = (res.paths || []).map(p => p.state);
   const all = s => states.length && states.every(x => x === s);
+  const none = states.every(s => s === "failed");
   let msg, kind = "good", actions = "";
-  if (res.cancelled) { msg = "Cancelled. What was already moved stays in the Recycle Bin."; kind = ""; }
-  else if (res.mode === "trash" && all("trashed")) {
-    msg = `Moved ${name} to the Recycle Bin. The space is freed when you empty the Recycle Bin.`;
-    actions = actBtn("empty-bin", "Empty Recycle Bin…", "");
+  if (res.mode === "trash") {
+    const emptyBin = actBtn("empty-bin", "Empty Recycle Bin…", "");
+    if (res.cancelled) {
+      msg = none ? "Cancelled: nothing was moved to the Recycle Bin." : "Cancelled. What was already moved stays in the Recycle Bin.";
+      kind = "";
+    } else if (all("trashed")) {
+      msg = `Moved ${name} to the Recycle Bin. The space is freed when you empty the Recycle Bin.`;
+      actions = emptyBin;
+    } else if (none) {
+      msg = `${name} wasn't moved to the Recycle Bin.`; kind = "bad";
+    } else {
+      msg = `Moved part of ${name} to the Recycle Bin. The space is freed when you empty the Recycle Bin.`; kind = "";
+      actions = emptyBin;
+    }
+    if (res.errors && res.errors.length) msg += " " + esc(res.errors[0]);
+  } else if (res.stopped) {
+    kind = "";
+    msg = res.files ? `Stopped. ${plural(res.files, "file", "files")} of ${name} ${res.files === 1 ? "was" : "were"} deleted · freed ${esc(size(res.freed))}. The rest is still there.` : "Stopped before anything was deleted.";
   } else if (all("deleted") || all("emptied")) {
     msg = `Deleted ${name} · freed ${esc(size(res.freed))}.`;
   } else {
-    kind = states.every(s => s === "failed") ? "bad" : "";
+    kind = none ? "bad" : "";
     msg = res.freed ? `Deleted part of ${name} · freed ${esc(size(res.freed))}.` : `${name} wasn't deleted.`;
     if (res.inUse) msg += ` ${plural(res.inUse, "file is", "files are")} in use: close the app that uses ${res.inUse === 1 ? "it" : "them"}, then try again.`;
     if (res.denied) {
@@ -1307,6 +1377,10 @@ function afterDelete(ctx, res) {
     if (res.errors && res.errors.length) msg += " " + esc(res.errors[0]);
   }
   if (res.kept) msg += ` Left alone: ${plural(res.kept, "part", "parts")} that Windows or an installed app needs.`;
+  if (res.left) {
+    const names = ((ctx.check && ctx.check.leave) || []).map(e => esc(e.name));
+    msg += ` Left alone, as the report lists ${res.left === 1 ? "it" : "them"} on ${res.left === 1 ? "its" : "their"} own: ${names.length ? names.join(", ") : plural(res.left, "part", "parts")}.`;
+  }
   toast(msg, kind, { actions });
 }
 
@@ -1350,16 +1424,24 @@ async function doUninstall() {
   closeDialog();
   const r = await api().uninstall(APP.drive, p.group, p.index);
   if (!r.ok) { toast(esc(r.error), "bad"); return; }
-  WAITING.add(p.group); render();
-  const wait = toast(`Waiting for ${esc(p.u.name)} to be uninstalled. Follow the uninstaller's steps.`, "wait",
+  WAITING.set(p.group, p.u.name); render();
+  const waiting = `Waiting for ${esc(p.u.name)} to be uninstalled. Follow the uninstaller's steps.`;
+  const wait = toast(`<span class="msg">${waiting}</span>`, "wait",
     { sticky: true, actions: actBtn("stop-task", "Stop waiting", "", { task: r.task }) });
-  const res = await pollTask(r.task, null, 1000);
+  const res = await pollTask(r.task, pr => {
+    const line = wait.querySelector(".msg");
+    if (line) line.innerHTML = pr.running ? waiting : `${esc(p.u.name)}'s uninstaller has closed. Checking that Windows no longer lists it…`;
+  }, 1000);
   wait.remove();
   WAITING.delete(p.group);
   if (res.state === "removed") {
-    GONE_APPS.add(p.group);
-    toast(`Uninstalled <b>${esc(p.u.name)}</b>. Its leftover folders can now be deleted here. Scan again to see what it freed.`, "good", { actions: actBtn("scan", `${ICONS.scan}Scan again`, "") });
+    markRemoved({ group: p.group, index: p.index, name: p.u.name });
+    const others = stillInstalled(p.group);
+    toast(`Uninstalled <b>${esc(p.u.name)}</b>. ` + (others.length
+      ? `Still installed in ${esc(p.group)}: ${others.map(esc).join(", ")}, so its folders stay until ${others.length === 1 ? "it's" : "they're"} uninstalled too.`
+      : "Its leftover folders can now be deleted here. Scan again to see what it freed."), "good", { actions: actBtn("scan", `${ICONS.scan}Scan again`, "") });
   } else if (res.state === "cancelled") toast("Uninstall cancelled.");
+  else if (res.state === "kept") toast(`Windows still lists ${esc(p.u.name)} as installed, and its uninstaller has closed. If the uninstall is still going on in another window, or asked you to restart, scan again once it's done.`);
   else if (res.state === "stopped") toast(`Stopped waiting. If you finished uninstalling ${esc(p.u.name)}, scan again to update the report.`);
   else toast(esc(res.error || "The uninstall didn't work."), "bad");
   if (res.usage) APP.usage = res.usage;
@@ -1383,6 +1465,11 @@ async function doRun() {
   const r = await api().run_command(p.cmd);
   if (r.ok) toast("Started in a terminal window. Scan again afterwards to see the space it freed.", "good");
   else if (!r.cancelled) toast(esc(r.error), "bad");
+}
+
+// The app calls this when its window is closed while something is still being deleted or uninstalled
+function closingSoon() {
+  toast("Disk Report closes as soon as what it's doing is finished and written in its log. Close it again to quit now.", "wait", { sticky: true });
 }
 
 // ------------------------------------------------------------------ start

@@ -915,7 +915,7 @@ class Classifier:
             node = self.node_at(path) if path else None
             if node is None or path.lower() in self.claims:
                 continue
-            item = self.new(name, cat, safety, desc)
+            item = self.new(name.replace("%ROOT%", self.drive), cat, safety, desc.replace("%ROOT%", self.drive))
             item.container = True
             item.kind = kind
             self.claim(path if path != self.drive else self.drive + "\\", node, item)
@@ -1110,8 +1110,9 @@ class Classifier:
                 item = self.new(name, K.APP, K.UNINSTALL, "Contains files of an installed app.", None, group)
             else:
                 item = self.new(name, K.OTHER, K.UNKNOWN,
-                                "A folder at the top of C:. It isn't part of Windows and no installed app points to "
-                                "it, so it was probably made by you, by a portable tool or by a driver installer.",
+                                "A folder at the top of %s. It isn't part of Windows and no installed app points to "
+                                "it, so it was probably made by you, by a portable tool or by a driver installer."
+                                % self.drive,
                                 "Open it to see what it is. Delete it only if you know you don't need it.")
         elif kind == "users":
             item = self.new("Account: " + name, K.OTHER, K.REVIEW,

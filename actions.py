@@ -3,8 +3,10 @@ or for good), empty the Recycle Bin, uninstall an app, run a cleaning command in
 
 Each function acts on what it's given, only when the person clicks and confirms in the app, and reports what
 happened. Guard decides what may be deleted at all: never Windows, program or user folders themselves, never
-something the report says to keep, never an app that is still installed (uninstall it instead), and never what
-such things hold inside a folder you delete: those parts are skipped and reported.
+another account's files, never something the report says to keep, never an app that is still installed (uninstall
+it instead), and never what such things hold inside a folder you delete: those parts are skipped and reported. Nor
+does a folder take with it what the report lists on its own with a more careful label (a Safe-to-clean cache never
+takes Optional AI models with it).
 """
 from __future__ import annotations
 
@@ -21,6 +23,7 @@ LONG = "\\\\?\\"                 # lets Windows APIs use paths longer than 260 c
 REPARSE = stat.FILE_ATTRIBUTE_REPARSE_POINT
 DIRECTORY = stat.FILE_ATTRIBUTE_DIRECTORY
 READONLY = stat.FILE_ATTRIBUTE_READONLY
+HIDDEN_SYSTEM = stat.FILE_ATTRIBUTE_HIDDEN | stat.FILE_ATTRIBUTE_SYSTEM   # Windows' protected operating system files
 NAME_SURROGATE = 0x20000000      # reparse tag bit of junctions and symlinks (not of OneDrive placeholders)
 CLOUD_ONLY = 0x00400000 | 0x00040000 | 0x00001000
 IN_USE = (32, 33)                # sharing violation, lock violation
@@ -62,17 +65,30 @@ def is_link(st):
     return bool(st.st_file_attributes & REPARSE and st.st_reparse_tag & NAME_SURROGATE)
 
 
+def is_system(path):
+    """True for what Windows marks as a protected operating system file or folder (hidden and system)."""
+    try:
+        attrs = os.stat(LONG + os.path.normpath(path), follow_symlinks=False).st_file_attributes
+    except OSError:
+        return False
+    return attrs & HIDDEN_SYSTEM == HIDDEN_SYSTEM
+
+
 # ------------------------------------------------------------------------------------------------ deleting
 
-def delete_for_good(path, contents_only=False, keep=(), cluster=4096, progress=None):
+def delete_for_good(path, contents_only=False, keep=(), cluster=4096, progress=None, leave=(), stop=None):
     """Delete a file or folder without the Recycle Bin, or with contents_only only what's inside the folder.
 
-    Links (junctions, symlinks) are removed, never followed. Paths in `keep` are left alone, and so are the
-    folders that hold them. Files in use or locked are skipped and counted. progress(counts) is called now and
-    then. Returns counts: freed bytes, files deleted, inUse, denied, kept, missing, errors.
+    Links (junctions, symlinks) are removed, never followed. Paths in `keep` (needed by Windows or an installed app)
+    and in `leave` (listed in the report on their own, with a more careful label) are left alone, and so are the
+    folders that hold them. Files in use or locked are skipped and counted. progress(counts) is called now and then,
+    and when stop() answers True the deleting stops there. Returns counts: freed bytes, files deleted, inUse,
+    denied, kept, left, missing, stopped, errors.
     """
-    out = {"freed": 0, "files": 0, "inUse": 0, "denied": 0, "kept": 0, "missing": False, "errors": []}
+    out = {"freed": 0, "files": 0, "inUse": 0, "denied": 0, "kept": 0, "left": 0, "missing": False,
+           "stopped": False, "errors": []}
     keep = {norm(k) for k in keep}
+    leave = {norm(k) for k in leave} - keep
     path = os.path.normpath(path)        # the \\?\ prefix turns off Windows' own clean-up of / and ..
     try:
         st = os.stat(LONG + path, follow_symlinks=False)
@@ -93,7 +109,7 @@ def delete_for_good(path, contents_only=False, keep=(), cluster=4096, progress=N
         return out
     next_report = 0.0
     stack = [(path, False)]
-    while stack:
+    while stack and not out["stopped"]:
         folder, emptied = stack.pop()
         if emptied:
             if folder != path or not contents_only:
@@ -106,10 +122,17 @@ def delete_for_good(path, contents_only=False, keep=(), cluster=4096, progress=N
         except OSError as e:
             _failed(out, folder, e)
             continue
-        for entry in entries:
+        for n, entry in enumerate(entries):
+            if n % 256 == 0 and stop is not None and stop():   # also inside folders that hold many files
+                out["stopped"] = True
+                break
             p = folder + "\\" + entry.name
-            if norm(p) in keep:
+            key = norm(p)
+            if key in keep:
                 out["kept"] += 1
+                continue
+            if key in leave:
+                out["left"] += 1
                 continue
             try:
                 est = entry.stat(follow_symlinks=False)
@@ -204,23 +227,30 @@ FOF_WANTNUKEWARNING = 0x4000
 
 
 def recycle(paths, hwnd=None):
-    """Move files or folders to the Recycle Bin, with Windows' own progress window and its warning before
-    deleting for good anything too big for the Recycle Bin. Returns {"ok", "cancelled", "error"}."""
+    """Move files or folders to the Recycle Bin, all in one go: one progress window from Windows, whose Cancel
+    stops the lot, and its warning before deleting for good anything too big for the Recycle Bin. Paths of 260
+    characters or more can't go to the Recycle Bin: they're left alone and listed in "tooLong".
+    Returns {"ok", "cancelled", "error", "tooLong"}."""
     paths = [os.path.normpath(p) for p in paths]
     paths = [p for p in paths if os.path.lexists(LONG + p)]
+    too_long = [p for p in paths if len(p) >= 260]
+    paths = [p for p in paths if len(p) < 260]
+    out = {"ok": True}
+    if too_long:
+        out = {"ok": False, "tooLong": too_long, "error": "%s too long for the Recycle Bin, so %s left alone. Delete "
+               "%s permanently instead." % (("A path is", "it was", "it") if len(too_long) == 1 else
+                                           ("%d paths are" % len(too_long), "they were", "them"))}
     if not paths:
-        return {"ok": True, "missing": True}
-    if any(len(p) >= 260 for p in paths):
-        return {"ok": False, "error": "A path is too long for the Recycle Bin. Delete it permanently instead."}
+        return out if too_long else {"ok": True, "missing": True}
     buf = ctypes.create_unicode_buffer("\0".join(paths) + "\0")   # the list ends with two nulls
     op = SHFILEOPSTRUCTW(hwnd=hwnd, wFunc=FO_DELETE, pFrom=ctypes.addressof(buf),
                          fFlags=FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_WANTNUKEWARNING)
     code = shell32.SHFileOperationW(ctypes.byref(op))
     if op.fAnyOperationsAborted:
-        return {"ok": False, "cancelled": True}
+        return dict(out, ok=False, cancelled=True)
     if code:
-        return {"ok": False, "error": "Windows couldn't move it to the Recycle Bin (code %#x)." % (code & 0xFFFFFFFF)}
-    return {"ok": True}
+        return dict(out, ok=False, error="Windows couldn't move it to the Recycle Bin (code %#x)." % (code & 0xFFFFFFFF))
+    return out
 
 
 class SHQUERYRBINFO(ctypes.Structure):
@@ -310,6 +340,96 @@ def wait(handle, seconds=None):
 def close(handle):
     if handle:
         kernel32.CloseHandle(handle)
+
+
+class PROCESSENTRY32W(ctypes.Structure):
+    _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260)]
+
+
+kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+kernel32.Process32FirstW.restype = wintypes.BOOL
+kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+kernel32.Process32NextW.restype = wintypes.BOOL
+kernel32.GetProcessId.argtypes = [wintypes.HANDLE]
+kernel32.GetProcessId.restype = wintypes.DWORD
+kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+kernel32.GetProcessTimes.restype = wintypes.BOOL
+TH32CS_SNAPPROCESS = 0x2
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+INVALID_HANDLE = ctypes.c_void_p(-1).value
+
+
+def processes():
+    """Every running process: {process id: (parent's process id, program name)}."""
+    snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if not snap or snap == INVALID_HANDLE:
+        return {}
+    out = {}
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        more = kernel32.Process32FirstW(snap, ctypes.byref(entry))
+        while more:
+            out[entry.th32ProcessID] = (entry.th32ParentProcessID, entry.szExeFile)
+            more = kernel32.Process32NextW(snap, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snap)
+    return out
+
+
+def started_at(pid=None, handle=None):
+    """When a process started (a FILETIME count), or None when Windows won't say."""
+    own = None
+    if not handle:
+        own = handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid or 0)
+        if not handle:
+            return None
+    try:
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not kernel32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]):
+            return None
+        return times[0].dwHighDateTime << 32 | times[0].dwLowDateTime
+    finally:
+        if own:
+            kernel32.CloseHandle(own)
+
+
+class ProcessTree:
+    """A program started with start(), and every process it starts in turn, even after the first one has exited:
+    uninstallers often copy themselves to a temporary folder, start the copy and exit at once."""
+
+    def __init__(self, handle):
+        self.root = kernel32.GetProcessId(handle) if handle else 0
+        self.since = started_at(handle=handle) if handle else None
+        self.known = {}                  # process id -> program name ("" when it had already exited)
+        if self.root:
+            self.known[self.root] = processes().get(self.root, (0, ""))[1]
+
+    def alive(self):
+        """True while the program, or anything it started, is still running."""
+        found = processes()
+        grew = True
+        while grew:
+            grew = False
+            for pid, (parent, name) in found.items():
+                if pid in self.known or pid == parent or parent not in self.known:
+                    continue
+                now = found.get(parent)
+                if now is not None and self.known[parent] and now[1] != self.known[parent]:
+                    continue                 # that process id belongs to another program by now
+                born = started_at(pid)
+                if born is not None and self.since is not None and born < self.since:
+                    continue                 # older than the program: its parent's process id was only reused
+                self.known[pid] = name
+                grew = True
+        return any(name and found.get(pid, (0, ""))[1] == name for pid, name in self.known.items())
 
 
 def reveal(path):
@@ -467,11 +587,22 @@ def item_paths(item):
     return out
 
 
+# How careful deleting something is, by its label: a folder never takes with it something the report lists on its
+# own with a more careful label. An app's data that's still labelled "uninstall" once the app is gone is a leftover.
+CAUTION = {"safe": 0, "optional": 1, "uninstall": 1, "unknown": 2, "review": 2}
+# Known folders in your profile and in the Public profile that are never deleted themselves, only what's inside
+HOME_FOLDERS = ("Saved Games", "Contacts", "Favorites", "Links", "Searches", "3D Objects")
+PUBLIC_FOLDERS = ("Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos", "Libraries", "AccountPictures")
+
+
 class Guard:
     """Decides what may be deleted, from the scan and a few places that are never deleted whole.
 
-    check(path) answers with {"ok": True, "keep": [...]} (parts to leave alone inside it) or
-    {"ok": False, "reason": "..."}.
+    check(path) answers {"ok": False, "reason": "..."} or {"ok": True, ...} with what else the report lists inside
+    the path, as paths ("keep", "leave", "also") and as items to show ("keepItems"... with name, safety and size):
+    keep: needed by Windows or an installed app, left alone;
+    leave: listed on its own with a more careful label than the path's own, left alone too;
+    also: the other listed things it holds, which go with it.
     """
 
     def __init__(self, scan, tokens, own=()):
@@ -488,16 +619,26 @@ class Guard:
         self.programs = [norm(t[k]) for k in ("%PF%", "%PF86%", "%PD%") if k in t]
         self.store = norm(t["%PF%"] + "\\WindowsApps")
         home = t["~"]
+        self.users = norm(t["%ROOT%"] + "\\Users")
+        me = norm(home)
+        self.me = me[len(self.users) + 1:].split("\\")[0] if me.startswith(self.users + "\\") else None
+        public = t["%ROOT%"] + "\\Users\\Public"
         never = [self.drive + "\\", t["%WIN%"], t["%ROOT%"] + "\\Users", home, home + "\\AppData", t["%LOCAL%"],
                  t["%ROAMING%"], t["%LOCALLOW%"], t["%LOCAL%"] + "\\Packages", t["%LOCAL%"] + "\\Programs",
                  t["%LOCAL%"] + "\\Temp", t["%PD%"], t["%PF%"], t["%PF86%"], t.get("%CF%", ""), t.get("%CF86%", ""),
                  self.drive + "\\$Recycle.Bin", self.drive + "\\System Volume Information",
-                 self.drive + "\\pagefile.sys", self.drive + "\\hiberfil.sys", self.drive + "\\swapfile.sys"]
+                 self.drive + "\\pagefile.sys", self.drive + "\\hiberfil.sys", self.drive + "\\swapfile.sys", public]
         never += [t[k] for k in ("%DOCUMENTS%", "%DESKTOP%", "%DOWNLOADS%", "%PICTURES%", "%VIDEOS%", "%MUSIC%")
                   if k in t]
+        never += [home + "\\" + name for name in HOME_FOLDERS] + [public + "\\" + name for name in PUBLIC_FOLDERS]
         never += [p for p, _ in meta.get("syncRoots") or []]
         never += list(own)
         self.never = {norm(p) for p in never if p}
+        # every folder directly in Users (accounts, Public, Default): none is ever deleted whole
+        self.never |= {key for key in self.claims if key.rsplit("\\", 1)[0] == self.users}
+        # other accounts' folders: nothing inside them is deleted either, so the page offers no Delete there
+        self.locked = {key for key in self.claims if key.rsplit("\\", 1)[0] == self.users and
+                       self.account(key) not in (self.me, "public", "default")}
         self._installed = {}
 
     def owner(self, key):
@@ -525,6 +666,16 @@ class Guard:
         self._installed[group] = (answer, time.time())
         return answer
 
+    def account(self, key):
+        """The account folder a (normalized) path is in ('sara' for C:\\Users\\Sara\\...), or None."""
+        if not key.startswith(self.users + "\\"):
+            return None
+        return key[len(self.users) + 1:].split("\\")[0]
+
+    def needed(self, item):
+        return bool(item.get("container") or item.get("safety") == "keep" or
+                    (item.get("safety") == "uninstall" and self.installed(item.get("group"))))
+
     def check(self, path, contents_only=False):
         if not path or not os.path.isabs(path) or path.startswith("\\\\") or ".." in path.split("\\"):
             return {"ok": False, "reason": "That isn't a path Disk Report can act on."}
@@ -535,6 +686,9 @@ class Guard:
         if item is None:
             return {"ok": False, "reason": "That isn't part of this report."}
         name = item.get("name", "")
+        safety = item.get("safety")
+        if self.account(key) not in (None, self.me, "public", "default"):
+            return {"ok": False, "reason": "That's in another account's folder. Sign in to that account to clean it."}
         if contents_only:
             if self.claims.get(key) is not item or item.get("cat") != "cache" or \
                     item.get("safety") not in ("safe", "optional"):
@@ -544,7 +698,6 @@ class Guard:
                                            "inside instead."}
         if inside(key, self.store):
             return {"ok": False, "reason": "Microsoft Store apps are removed by uninstalling them."}
-        safety = item.get("safety")
         if item.get("container") or safety == "keep":
             return {"ok": False, "reason": "“%s” is needed by Windows or by an app you use." % name}
         if safety == "uninstall" and self.installed(item.get("group")):
@@ -554,14 +707,49 @@ class Guard:
             return {"ok": False, "reason": "Disk Report only deletes the parts of Windows its catalog says are safe."}
         if any(inside(key, p) for p in self.programs) and safety not in ("safe", "optional", "unknown"):
             return {"ok": False, "reason": "That's part of an installed program. Uninstall the program instead."}
-        keep, names = [], []
+        if key.rsplit("\\", 1)[0] == self.root and safety not in ("safe", "optional") and is_system(path):
+            return {"ok": False, "reason": "Windows marks it as a protected operating system file, so Disk Report "
+                                           "leaves it alone."}
+        return dict(self.held(key, item), ok=True)
+
+    def held(self, key, item):
+        """What else the report lists inside `key`: what stays (keep, leave) and what goes with it (also)."""
+        mine = CAUTION.get(item.get("safety"), 2)
+        found = {"keep": [], "leave": [], "also": []}
         for claimed, other in self.claims.items():
             if other is item or not claimed.startswith(key + "\\"):
                 continue
-            needed = other.get("container") or other.get("safety") == "keep" or \
-                (other.get("safety") == "uninstall" and self.installed(other.get("group")))
-            if needed:
-                keep.append(claimed)
-                if other.get("name") not in names:
-                    names.append(other.get("name"))
-        return {"ok": True, "keep": keep, "keepNames": names[:6]}
+            how = "keep" if self.needed(other) else "leave" if CAUTION.get(other.get("safety"), 2) > mine else "also"
+            found[how].append((claimed, other))
+        stays = [c for c, _ in found["keep"] + found["leave"]]
+        out = {}
+        for how, pairs in found.items():
+            # what's inside a folder that stays is never reached; what's inside one that goes is counted with it
+            outer = stays if how != "also" else stays + [c for c, _ in pairs]
+            pairs = [(c, o) for c, o in pairs if not any(c.startswith(s + "\\") for s in outer)]
+            out[how] = [c for c, _ in pairs]
+            out[how + "Items"] = self.summary(pairs)
+        out["keepNames"] = [i["name"] for i in out["keepItems"]][:6]
+        return out
+
+    @staticmethod
+    def summary(pairs):
+        """(path, item) pairs as one entry per item: name, safety, and its size at the last scan (None if unknown)."""
+        by_item = {}
+        for claimed, item in pairs:
+            entry = by_item.setdefault(id(item), {"name": item.get("name", ""), "safety": item.get("safety"),
+                                                  "size": 0})
+            bytes_ = size_under(claimed, item)
+            entry["size"] = None if bytes_ is None or entry["size"] is None else entry["size"] + bytes_
+        return sorted(by_item.values(), key=lambda e: -(e["size"] or 0))
+
+
+def size_under(claimed, item):
+    """The bytes under one of an item's folders at the last scan, other listed items inside included, or None."""
+    tops = item.get("targets") or item.get("paths") or []
+    if len(tops) <= 1:
+        return item.get("raw") or item.get("size") or 0
+    for part in item.get("parts") or []:
+        if norm(part[0]) == claimed:
+            return part[1]
+    return None

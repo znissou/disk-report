@@ -54,9 +54,20 @@ def find_iscc():
     return None
 
 
+def clean(dist=DIST, build=BUILD, version=VERSION):
+    """Remove what the last build of this version made (the app folder, its zip and its installer) and the build
+    folder. Anything else in dist\\, such as release notes, stays."""
+    shutil.rmtree(build, ignore_errors=True)
+    shutil.rmtree(os.path.join(dist, NAME), ignore_errors=True)
+    for name in ("DiskReport-%s-portable.zip" % version, "DiskReport-Setup-%s.exe" % version):
+        try:
+            os.remove(os.path.join(dist, name))
+        except FileNotFoundError:
+            pass
+
+
 def main():
-    for folder in (DIST, BUILD):
-        shutil.rmtree(folder, ignore_errors=True)
+    clean()
     os.makedirs(BUILD)
     nums = ", ".join((VERSION.split(".") + ["0", "0", "0"])[:4])
     version_file = os.path.join(BUILD, "version_info.txt")

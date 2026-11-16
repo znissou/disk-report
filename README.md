@@ -57,9 +57,9 @@ Open any item to see what it is, and act on it right there, one thing at a time:
 
 - **Open in Explorer** the folder, or any file or folder listed inside it.
 - **Delete** a cache, a leftover, a big file, an extra copy of a duplicate. You choose **Move to Recycle Bin**
-  (you can restore it) or **Delete permanently** (the space is freed now). Caches are emptied in place: the
-  folder stays and the app fills it again when it needs to. Files in use are skipped and counted; if Windows
-  needs administrator rights for some of them, the app offers to finish as administrator.
+  (you can restore it) or **Delete permanently** (the space is freed now, and you can stop it midway). Caches are
+  emptied in place: the folder stays and the app fills it again when it needs to. Files in use are skipped and
+  counted; if Windows needs administrator rights for some of them, the app offers to finish as administrator.
 - **Uninstall** an app: the app's own uninstaller starts, as it would from Settings → Apps. Disk Report notices
   when the app is gone, and its leftover folders can then be deleted too.
 - **Run** a cleaning command from the catalog (`npm cache clean --force`, `docker system prune`,
@@ -73,9 +73,12 @@ What the app never does:
 - Nothing happens on its own. Every action is for one item and starts only after you confirm it.
 - It never deletes Windows, Program Files, ProgramData, AppData, your user folder or the Documents,
   Downloads, Desktop… folders themselves (only things inside them), nor anything labelled **Keep**.
+- It never deletes another account's files, nor what Windows marks as protected system files at the top of
+  the drive.
 - It never deletes the folders of an app that's still installed: you uninstall the app instead.
-- When a folder you delete holds something Windows or an installed app needs, that part is left alone and
-  you're told so.
+- When a folder you delete holds other things the report lists, the confirmation names them with their size.
+  Those Windows or an installed app needs are left alone, and so are those with a more careful label than the
+  folder: a cache that's **Safe to clean** never takes **Optional** AI models with it.
 - Everything you do is written to `%LOCALAPPDATA%\Disk Report\actions.jsonl`.
 
 > Right-click Disk Report → **Run as administrator** to also measure System Restore points and a few

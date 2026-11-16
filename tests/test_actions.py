@@ -2,24 +2,38 @@
 
     py -m unittest discover tests
 
-Everything happens in temporary folders, except two read-only looks at the registry and the Recycle Bin.
-Set DISK_REPORT_TEST_RECYCLE=1 to also send one tiny temporary file to the Recycle Bin.
+Everything happens in temporary folders, except two read-only looks at the registry and the Recycle Bin. The app's
+own data folder (scans, action log) is a temporary one too. Moving to the Recycle Bin is imitated, except with
+DISK_REPORT_TEST_RECYCLE=1, which also sends one tiny temporary file to the real Recycle Bin.
 """
+import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 import winreg
 
+DATA = tempfile.mkdtemp(prefix="disk-report-test-data-")
+os.environ["DISK_REPORT_DATA"] = DATA       # before app is imported: it reads it once
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import actions  # noqa: E402
+import app  # noqa: E402
+import build  # noqa: E402
 import catalog  # noqa: E402
 import disk_report  # noqa: E402
 
 LONG = actions.LONG
+NO_WINDOW = 0x08000000
+
+
+def tearDownModule():
+    shutil.rmtree(DATA, True)
 
 
 def write(path, text="x" * 5000):
@@ -117,6 +131,32 @@ class DeleteForGood(unittest.TestCase):
         self.assertFalse(os.path.exists(target))
         self.assertEqual(out["files"], 1)
 
+    def test_leaves_what_it_is_told_to_leave(self):
+        target = os.path.join(self.root, ".cache")
+        write(os.path.join(target, "tool\\a.bin"))
+        write(os.path.join(target, "huggingface\\model.safetensors"))
+        out = actions.delete_for_good(target, contents_only=True, leave=[os.path.join(target, "huggingface")])
+        self.assertTrue(os.path.isfile(os.path.join(target, "huggingface", "model.safetensors")))
+        self.assertFalse(os.path.exists(os.path.join(target, "tool")))
+        self.assertEqual((out["left"], out["kept"], out["files"]), (1, 0, 1))
+
+    def test_stop(self):
+        target = os.path.join(self.root, "big")
+        for name in ("a\\1.bin", "b\\2.bin", "3.bin"):
+            write(os.path.join(target, name))
+        out = actions.delete_for_good(target, stop=lambda: True)
+        self.assertTrue(out["stopped"])
+        self.assertEqual(out["files"], 0)
+        self.assertTrue(os.path.isfile(os.path.join(target, "3.bin")))
+
+    def test_system_files(self):
+        folder = os.path.join(self.root, "Boot")
+        os.makedirs(folder)
+        self.assertFalse(actions.is_system(folder))
+        subprocess.run(["attrib", "+H", "+S", folder], check=True)
+        self.addCleanup(subprocess.run, ["attrib", "-H", "-S", folder])
+        self.assertTrue(actions.is_system(folder))
+
 
 class GuardRules(unittest.TestCase):
     @classmethod
@@ -144,6 +184,19 @@ class GuardRules(unittest.TestCase):
             "node": {"name": "node_modules folders", "cat": "dev", "safety": "safe", "kind": "artifacts",
                      "paths": [t["%DOCUMENTS%"] + "\\p1\\node_modules"],
                      "targets": [t["%DOCUMENTS%"] + "\\p1\\node_modules", t["%DOCUMENTS%"] + "\\p2\\node_modules"]},
+            "public": {"name": "Public folder", "cat": "other", "safety": "review", "paths": ["C:\\Users\\Public"]},
+            "sara": {"name": "Account: Sara", "cat": "other", "safety": "review", "paths": ["C:\\Users\\Sara"]},
+            "boot": {"name": "Boot", "cat": "other", "safety": "unknown", "paths": ["C:\\Boot"]},
+            "cache": {"name": "Tool caches (.cache)", "cat": "cache", "safety": "safe", "size": 100,
+                      "paths": [t["~"] + "\\.cache"]},
+            "puppeteer": {"name": "Puppeteer browsers", "cat": "cache", "safety": "safe", "size": 600,
+                          "paths": [t["~"] + "\\.cache\\puppeteer"]},
+            "hf": {"name": "Hugging Face AI models", "cat": "cache", "safety": "optional", "size": 30,
+                   "paths": [t["~"] + "\\.cache\\huggingface"]},
+            "avd": {"name": "Android emulator: Pixel", "cat": "dev", "safety": "optional", "size": 3000,
+                    "paths": [t["~"] + "\\.android\\avd\\Pixel.avd"]},
+            "snapshot": {"name": "Quick Boot snapshot: Pixel", "cat": "cache", "safety": "safe", "size": 4000,
+                         "raw": 4100, "paths": [t["~"] + "\\.android\\avd\\Pixel.avd\\snapshots"]},
         }
         scan = {"meta": {"drive": "C:", "syncRoots": []}, "items": list(cls.items.values()),
                 "apps": {"Gone App": [{"name": "Gone App", "kind": "win32",
@@ -195,6 +248,43 @@ class GuardRules(unittest.TestCase):
         for path in ("", "relative\\path", "D:\\elsewhere", "C:\\Tools\\..\\Windows", "\\\\server\\share\\x"):
             self.assertFalse(self.ok(path), path)
 
+    def test_other_accounts_are_refused(self):
+        for path in ("C:\\Users\\Sara", "C:\\Users\\Sara\\Downloads\\big.iso"):
+            verdict = self.guard.check(path)
+            self.assertFalse(verdict["ok"], path)
+            self.assertIn("another account", verdict["reason"])
+        self.assertIn("c:\\users\\sara", self.guard.never)       # so the page shows no Delete button for it,
+        self.assertEqual(self.guard.locked, {"c:\\users\\sara"})  # nor for anything inside it
+
+    def test_public_folders_themselves_stay(self):
+        self.assertFalse(self.ok("C:\\Users\\Public"))
+        self.assertFalse(self.ok("C:\\Users\\Public\\Documents"))
+        self.assertTrue(self.ok("C:\\Users\\Public\\Downloads\\setup.exe"))
+
+    def test_protected_system_files_at_the_top_of_the_drive(self):
+        real = actions.is_system
+        actions.is_system = lambda path: actions.norm(path) == "c:\\boot"
+        self.addCleanup(setattr, actions, "is_system", real)
+        verdict = self.guard.check("C:\\Boot")
+        self.assertFalse(verdict["ok"])
+        self.assertIn("protected operating system", verdict["reason"])
+        self.assertTrue(self.ok("C:\\Tools"))
+
+    def test_a_safe_cache_leaves_optional_things_inside_it(self):
+        home = self.t["~"]
+        verdict = self.guard.check(home + "\\.cache", True)
+        self.assertTrue(verdict["ok"])
+        self.assertEqual(verdict["also"], [actions.norm(home + "\\.cache\\puppeteer")])
+        self.assertEqual(verdict["leave"], [actions.norm(home + "\\.cache\\huggingface")])
+        self.assertEqual([(e["name"], e["size"]) for e in verdict["leaveItems"]], [("Hugging Face AI models", 30)])
+
+    def test_an_optional_folder_takes_its_safe_parts(self):
+        home = self.t["~"]
+        verdict = self.guard.check(home + "\\.android\\avd\\Pixel.avd")
+        self.assertEqual(verdict["also"], [actions.norm(home + "\\.android\\avd\\Pixel.avd\\snapshots")])
+        self.assertEqual(verdict["leave"], [])
+        self.assertEqual(verdict["alsoItems"][0]["size"], 4100)   # what's under its folder, not only its own share
+
 
 class UninstallCommands(unittest.TestCase):
     def test_split_command(self):
@@ -237,6 +327,298 @@ class Catalog(unittest.TestCase):
         for command in catalog.COMMANDS:
             self.assertIn(command, written)
             self.assertNotRegex(command, r"[<>&|]")
+
+
+def scan_of(items):
+    """A scan of C: with these items, under the item that holds everything at the top of C:."""
+    root = {"name": "Files at the top of C:", "cat": "other", "safety": "keep", "container": True, "paths": ["C:\\"]}
+    return {"meta": {"drive": "C:", "syncRoots": [], "cluster": 4096}, "items": [root] + items, "apps": {}}
+
+
+class AppDeleting(unittest.TestCase):
+    """The app's delete(), with the Recycle Bin imitated: what it hands to Windows and what it says happened."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="disk-report-test-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.calls, self.cancel = [], False
+        real = actions.recycle
+
+        def recycle(paths, hwnd=None):
+            self.calls.append(list(paths))
+            if self.cancel:
+                return {"ok": False, "cancelled": True}
+            for p in paths:
+                (shutil.rmtree if os.path.isdir(p) else os.remove)(p)
+            return {"ok": True}
+
+        actions.recycle = recycle
+        self.addCleanup(setattr, actions, "recycle", real)
+
+    def api(self, items):
+        shutil.rmtree(app.SCANS_DIR, True)
+        app.write_json(os.path.join(app.SCANS_DIR, "C-2026-01-01_000000.json"), scan_of(items))
+        api = app.Api()
+        api._hwnd = lambda: None
+        return api
+
+    @staticmethod
+    def finish(api, started):
+        assert started["ok"], started
+        while True:
+            view = api.task(started["task"])
+            if view["done"]:
+                return view["result"]
+            time.sleep(0.02)
+
+    def test_one_recycle_bin_operation_for_all_folders(self):
+        folders = [os.path.join(self.root, "p%d" % i, "node_modules") for i in (1, 2, 3)]
+        for f in folders:
+            write(os.path.join(f, "a.js"))
+        api = self.api([{"name": "node_modules folders", "cat": "dev", "safety": "safe", "kind": "artifacts",
+                         "paths": folders[:1], "targets": folders}])
+        result = self.finish(api, api.delete("C:", folders, "trash", False))
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual([p["state"] for p in result["paths"]], ["trashed"] * 3)
+
+    def test_cancel_stops_all_of_it(self):
+        folders = [os.path.join(self.root, "p%d" % i, "node_modules") for i in (1, 2)]
+        for f in folders:
+            write(os.path.join(f, "a.js"))
+        api = self.api([{"name": "node_modules folders", "cat": "dev", "safety": "safe", "kind": "artifacts",
+                         "paths": folders[:1], "targets": folders}])
+        self.cancel = True
+        result = self.finish(api, api.delete("C:", folders, "trash", False))
+        self.assertTrue(result["cancelled"])
+        self.assertEqual([p["state"] for p in result["paths"]], ["failed", "failed"])
+        self.assertTrue(all(os.path.isdir(f) for f in folders))
+
+    def test_a_cache_that_is_one_file_goes_to_the_recycle_bin(self):
+        dump = os.path.join(self.root, "MEMORY.DMP")
+        write(dump)
+        api = self.api([{"name": "Crash dump (blue screen)", "cat": "cache", "safety": "safe", "paths": [dump]}])
+        result = self.finish(api, api.delete("C:", [dump], "trash", True))
+        self.assertEqual(self.calls, [[dump]])
+        self.assertEqual(result["paths"][0]["state"], "trashed")
+        self.assertFalse(os.path.exists(dump))
+
+    def test_part_moved_is_partial(self):
+        tools = os.path.join(self.root, "Tools")
+        write(os.path.join(tools, "old.zip"))
+        write(os.path.join(tools, "Driver", "driver.sys"))
+        api = self.api([{"name": "Tools", "cat": "other", "safety": "unknown", "paths": [tools]},
+                        {"name": "Some driver", "cat": "system", "safety": "keep",
+                         "paths": [os.path.join(tools, "Driver")]}])
+        result = self.finish(api, api.delete("C:", [tools], "trash", False))
+        self.assertEqual(self.calls, [[os.path.join(tools, "old.zip")]])
+        self.assertEqual((result["paths"][0]["state"], result["kept"]), ("partial", 1))
+        self.assertEqual(result["untouched"], [actions.norm(os.path.join(tools, "Driver"))])
+
+    def test_what_goes_with_a_folder_is_marked(self):
+        avd = os.path.join(self.root, "Pixel.avd")
+        write(os.path.join(avd, "userdata.img"))
+        write(os.path.join(avd, "snapshots", "default_boot", "ram.img"))
+        api = self.api([{"name": "Android emulator: Pixel", "cat": "dev", "safety": "optional", "paths": [avd]},
+                        {"name": "Quick Boot snapshot: Pixel", "cat": "cache", "safety": "safe",
+                         "paths": [os.path.join(avd, "snapshots")]}])
+        check = api.check("C:", [avd], False)
+        self.assertEqual([e["name"] for e in check["also"]], ["Quick Boot snapshot: Pixel"])
+        result = self.finish(api, api.delete("C:", [avd], "forever", False))
+        self.assertEqual(result["paths"][0]["state"], "deleted")
+        self.assertEqual(result["inner"], [{"path": actions.norm(os.path.join(avd, "snapshots")), "state": "deleted"}])
+
+    def test_what_was_already_deleted_is_not_marked_as_left_alone(self):
+        cache = os.path.join(self.root, ".cache")
+        models = os.path.join(cache, "huggingface")
+        write(os.path.join(cache, "tool", "a.bin"))
+        write(os.path.join(models, "model.safetensors"))
+        api = self.api([{"name": "Tool caches (.cache)", "cat": "cache", "safety": "safe", "paths": [cache]},
+                        {"name": "Hugging Face AI models", "cat": "cache", "safety": "optional", "paths": [models]}])
+        result = self.finish(api, api.delete("C:", [cache], "forever", True))
+        self.assertEqual(result["untouched"], [actions.norm(models)])      # still there: left alone
+        self.finish(api, api.delete("C:", [models], "forever", False))     # deleted from its own row
+        write(os.path.join(cache, "tool", "b.bin"))
+        result = self.finish(api, api.delete("C:", [cache], "forever", True))
+        self.assertEqual(result["untouched"], [])
+
+    def test_unknown_ways_of_deleting_are_refused(self):
+        junk = os.path.join(self.root, "junk")
+        write(os.path.join(junk, "a.bin"))
+        api = self.api([{"name": "junk", "cat": "other", "safety": "unknown", "paths": [junk]}])
+        self.assertFalse(api.delete("C:", [junk], "recycle", False)["ok"])
+        self.assertTrue(os.path.isdir(junk))
+
+    def test_a_stopped_delete_says_so(self):
+        junk = os.path.join(self.root, "junk")
+        write(os.path.join(junk, "a.bin"))
+        verdict = {"keep": [], "leave": [], "also": []}
+        result = app.Api._delete_for_good([(junk, verdict)], False, 4096, {"stop": True, "progress": None})
+        self.assertTrue(result["stopped"])
+        self.assertEqual(result["paths"], [{"path": junk, "state": "failed"}])
+        self.assertTrue(os.path.isfile(os.path.join(junk, "a.bin")))
+
+
+class UninstallWait(unittest.TestCase):
+    def test_follows_what_the_uninstaller_starts(self):
+        # like NSIS and Inno Setup uninstallers: start a copy of yourself, then exit at once
+        child = "import time; time.sleep(4)"
+        parent = subprocess.Popen([sys.executable, "-c", "import subprocess, sys; subprocess.Popen([sys.executable, "
+                                   "'-c', %r], creationflags=%d)" % (child, NO_WINDOW)], creationflags=NO_WINDOW)
+        tree = actions.ProcessTree(int(parent._handle))
+        while parent.poll() is None:          # the app looks every 0.2 s at first
+            tree.alive()
+            time.sleep(0.05)
+        self.assertTrue(tree.alive())
+        deadline = time.time() + 20
+        while tree.alive() and time.time() < deadline:
+            time.sleep(0.2)
+        self.assertFalse(tree.alive())
+
+    def wait_for(self, alive, registered, root=1):
+        """Api._uninstall with an imitated uninstaller and clock: how the wait ends."""
+        clock = [0.0]
+
+        class Clock:
+            @staticmethod
+            def time():
+                return clock[0]
+
+            @staticmethod
+            def sleep(seconds):
+                clock[0] += seconds
+
+        class Tree:
+            def __init__(self, handle):
+                self.root = root
+
+            def alive(self):
+                return alive(clock[0])
+
+        for module, name, value in ((app, "time", Clock), (actions, "ProcessTree", Tree),
+                                    (actions, "uninstall_command", lambda ref: ("uninstaller.exe", "")),
+                                    (actions, "start", lambda *a, **k: None), (actions, "close", lambda h: None),
+                                    (actions, "is_registered", lambda ref: registered(clock[0]))):
+            self.addCleanup(setattr, module, name, getattr(module, name))
+            setattr(module, name, value)
+        task = {"stop": False, "progress": None}
+        state = app.Api()._uninstall({"kind": "win32", "name": "X", "ref": {}}, task)
+        return state[0], clock[0]
+
+    def test_still_installed_once_the_uninstaller_closed(self):
+        state, seconds = self.wait_for(alive=lambda t: t < 30, registered=lambda t: True)
+        self.assertEqual(state, "kept")
+        self.assertLess(seconds, 30 + app.UNINSTALL_GRACE + 5)
+
+    def test_removed(self):
+        self.assertEqual(self.wait_for(alive=lambda t: t < 30, registered=lambda t: t < 20)[0], "removed")
+
+    def test_nothing_to_follow_waits_for_windows(self):
+        # a link handed to an app that's already running (steam://uninstall/...): no process of its own to follow
+        state, seconds = self.wait_for(alive=lambda t: False, registered=lambda t: t < 300, root=0)
+        self.assertEqual(state, "removed")
+        self.assertGreaterEqual(seconds, 300)
+
+
+class ElevatedHelper(unittest.TestCase):
+    """app.elevated(), the part that runs with administrator rights, run here without them on temporary files."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="disk-report-test-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.target = os.path.join(self.root, "Tools")
+        write(os.path.join(self.target, "old.zip"))
+        self.scan = os.path.join(self.root, "C-2026-01-01_000000.json")
+        app.write_json(self.scan, scan_of([{"name": "Tools", "cat": "other", "safety": "unknown",
+                                            "paths": [self.target]}]))
+        self.result = os.path.join(self.root, "task.result.json")
+        self.task = os.path.join(self.root, "task.json")
+        app.write_json(self.task, {"scan": self.scan, "scanHash": app.sha256(self.scan),
+                                   "tokens": disk_report.path_tokens("C:"), "own": [], "paths": [self.target],
+                                   "contents": False, "cluster": 4096, "result": self.result})
+        self.digest = app.sha256(self.task)
+
+    def test_runs_the_task_it_was_given(self):
+        self.assertEqual(app.elevated(self.task, self.digest), 0)
+        self.assertFalse(os.path.exists(self.target))
+        self.assertEqual(app.read_json(self.result)[0]["files"], 1)
+
+    def test_refuses_a_changed_task_file(self):
+        with open(self.task, encoding="utf-8") as f:
+            task = json.load(f)
+        task["paths"] = [os.path.join(self.root, "something else")]
+        app.write_json(self.task, task)
+        self.assertEqual(app.elevated(self.task, self.digest), app.REFUSED)
+        self.assertEqual(app.elevated(self.task, ""), app.REFUSED)
+        self.assertTrue(os.path.isfile(os.path.join(self.target, "old.zip")))
+        self.assertFalse(os.path.exists(self.result))
+
+    def test_refuses_a_changed_scan(self):
+        with open(self.scan, "a", encoding="utf-8") as f:
+            f.write(" ")
+        self.assertEqual(app.elevated(self.task, self.digest), 0)
+        self.assertIn("refused", app.read_json(self.result)[0])
+        self.assertTrue(os.path.isfile(os.path.join(self.target, "old.zip")))
+
+
+class Closing(unittest.TestCase):
+    """The window's close button while something is being deleted: the window waits, then closes by itself."""
+
+    def setUp(self):
+        self.calls = []
+        calls = self.calls
+
+        class Window:
+            def run_js(self, script):
+                calls.append("told the page")
+
+            def destroy(self):
+                calls.append("closed")
+
+        self.api = app.Api()
+        self.api._window = Window()
+
+    def test_closes_at_once_when_nothing_runs(self):
+        self.assertTrue(self.api._on_closing())
+
+    def test_waits_for_what_runs_then_closes(self):
+        release = threading.Event()
+        task_id = self.api._tasks.start(lambda task: release.wait(10) and {"ok": True})
+        self.assertFalse(self.api._on_closing())
+        self.assertTrue(self.api._tasks._tasks[task_id]["stop"])      # a permanent delete stops at once
+        release.set()
+        deadline = time.time() + 10
+        while "closed" not in self.calls and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(self.calls, ["told the page", "closed"])
+
+    def test_closing_again_closes_at_once(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        self.api._tasks.start(lambda task: release.wait(10))
+        self.assertFalse(self.api._on_closing())
+        self.assertTrue(self.api._on_closing())
+
+
+class Building(unittest.TestCase):
+    def test_clean_keeps_what_the_build_did_not_make(self):
+        root = tempfile.mkdtemp(prefix="disk-report-test-")
+        self.addCleanup(shutil.rmtree, root, True)
+        dist, work = os.path.join(root, "dist"), os.path.join(root, "build")
+        for path in ("Disk Report\\Disk Report.exe", "DiskReport-2.0-portable.zip", "DiskReport-Setup-2.0.exe",
+                     "release-notes.md"):
+            write(os.path.join(dist, path))
+        write(os.path.join(work, "version_info.txt"))
+        build.clean(dist, work, "2.0")
+        self.assertEqual(os.listdir(dist), ["release-notes.md"])
+        self.assertFalse(os.path.exists(work))
+
+
+class DriveTexts(unittest.TestCase):
+    def test_the_drive_scanned_is_named(self):
+        tree = disk_report.Node("D:")
+        classifier = disk_report.Classifier(tree, "D:", disk_report.path_tokens("D:"), None, None)
+        classifier.claim_containers()
+        self.assertEqual([i.name for i in classifier.items], ["Files at the top of D:"])
 
 
 class RecycleBin(unittest.TestCase):

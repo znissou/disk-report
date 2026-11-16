@@ -120,6 +120,9 @@ RULES = [
       "Restore points and other data Windows protects. Only an administrator can measure it.",
       "Settings → System → About → System protection → Configure: delete old restore points or lower the maximum space."),
     R("%ROOT%\\Recovery", "Windows recovery tools", SYSTEM, KEEP, "Files Windows uses to repair or reset the PC."),
+    R("%ROOT%\\Boot", "Windows boot files", SYSTEM, KEEP,
+      "Files Windows needs to start, on PCs that start in the older BIOS mode.",
+      "Never delete it: Windows wouldn't start any more."),
     R("%ROOT%\\$WinREAgent", "Windows recovery update files", SYSTEM, KEEP,
       "Temporary files from an update of the Windows recovery environment. Windows removes them itself."),
     R("%ROOT%\\Windows.old", "Previous Windows installation", CACHE, OPTIONAL,
@@ -691,9 +694,10 @@ for _folder in BUILTIN_PROGRAM_FOLDERS:
 
 # Containers: folders whose subfolders each become an item of their own. Their own loose files
 # and small subfolders form one "remainder" item. (path, kind, remainder name, category, safety, text)
+# In the name and the text, %ROOT% stands for the drive scanned (C:).
 CONTAINERS = [
-    ("%ROOT%", "root", "Files at the top of C:", OTHER, KEEP, "Loose files in the root of the drive."),
-    ("%ROOT%\\Users", "users", "Users folder: loose files", OTHER, KEEP, "Loose files in C:\\Users."),
+    ("%ROOT%", "root", "Files at the top of %ROOT%", OTHER, KEEP, "Loose files in the root of the drive."),
+    ("%ROOT%\\Users", "users", "Users folder: loose files", OTHER, KEEP, "Loose files in %ROOT%\\Users."),
     ("~", "profile", "Your profile: loose files", OTHER, KEEP,
      "Loose files in your profile folder, including NTUSER.DAT (your part of the registry)."),
     ("~\\AppData", "appdata", "AppData: other", APPDATA, KEEP, "Loose files in AppData."),

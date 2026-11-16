@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import ctypes
 import datetime as dt
+import hashlib
+import hmac
 import json
 import os
 import shutil
@@ -39,6 +41,10 @@ KEEP_SCANS = 10      # per drive
 # Held while the app runs. installer.iss names it too (AppMutex), so Setup and the uninstaller wait until the
 # app is closed instead of replacing or removing its files under it.
 MUTEX = "DiskReportApp"
+# Once an uninstaller and everything it started have closed, how long Windows gets to drop the app from its list
+# before Disk Report says it's still installed (some uninstallers hand over to a program that's already running).
+UNINSTALL_GRACE = 60
+REFUSED = 2          # the administrator helper's exit code when its task file changed after the app wrote it
 
 
 # ------------------------------------------------------------------------------------------------ files
@@ -57,6 +63,11 @@ def read_json(path, default=None):
             return json.load(f)
     except (OSError, ValueError):
         return default
+
+
+def sha256(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
 
 
 def log_error(where):
@@ -198,17 +209,29 @@ def clean_paths(paths):
     return [os.path.normpath(p) for p in paths if isinstance(p, str) and p]
 
 
-def parts_to_recycle(path, keep, contents_only):
-    """The largest pieces of a folder that hold nothing to keep: the folder itself when that's possible."""
+def parts_to_recycle(path, keep, leave, contents_only):
+    """The largest pieces of a file or folder that hold nothing to keep or leave: the folder itself when that's
+    possible, or with contents_only what's inside it (a file goes whole). Returns (pieces, kept, left): the pieces,
+    and how many parts were skipped because they're needed, or listed on their own with a more careful label."""
     keep = {actions.norm(k) for k in keep}
+    leave = {actions.norm(k) for k in leave} - keep
+    stays = keep | leave
 
     def holds(p):
         key = actions.norm(p)
-        return any(k == key or k.startswith(key + "\\") for k in keep)
+        return any(k == key or k.startswith(key + "\\") for k in stays)
 
+    try:
+        st = os.stat(actions.LONG + path, follow_symlinks=False)
+    except OSError:
+        return [], 0, 0                      # already gone
+    if actions.is_link(st):
+        return ([], 0, 0) if contents_only else ([path], 0, 0)   # a link goes itself, what it points to never
+    if not st.st_file_attributes & actions.DIRECTORY:
+        return [path], 0, 0
     if not contents_only and not holds(path):
-        return [path]
-    out, stack = [], [path]
+        return [path], 0, 0
+    out, kept, left, stack = [], 0, 0, [path]
     while stack:
         folder = stack.pop()
         try:
@@ -217,10 +240,42 @@ def parts_to_recycle(path, keep, contents_only):
             continue
         for name in names:
             p = folder + "\\" + name
-            if actions.norm(p) in keep:
-                continue
-            (stack if holds(p) else out).append(p)
-    return out
+            key = actions.norm(p)
+            if key in keep:
+                kept += 1
+            elif key in leave:
+                left += 1
+            else:
+                (stack if holds(p) else out).append(p)
+    return out, kept, left
+
+
+def trash_state(path, pieces, contents):
+    """What became of a path after its pieces went to the Recycle Bin: trashed, partial or failed."""
+    moved = sum(1 for p in pieces if not os.path.lexists(actions.LONG + p))
+    if not os.path.lexists(actions.LONG + path) or (contents and moved == len(pieces)):
+        return "trashed"
+    return "partial" if moved else "failed"
+
+
+def forever_state(path, contents, result):
+    """What became of a path after delete_for_good(): deleted, emptied, partial or failed."""
+    if not os.path.lexists(actions.LONG + path):
+        return "deleted"
+    if contents and not (result["inUse"] or result["denied"] or result["errors"] or result.get("stopped")):
+        return "emptied"
+    return "partial" if result["files"] or result["kept"] or result.get("left") else "failed"
+
+
+def marks(verdicts, mode):
+    """For the page, after a delete: the other listed things that went with it, and what was left alone."""
+    inner, untouched = [], []
+    for _, verdict in verdicts:
+        inner += [{"path": p, "state": "trashed" if mode == "trash" else "deleted"} for p in verdict["also"]
+                  if not os.path.lexists(actions.LONG + p)]
+        # only what's still there: something deleted earlier from its own row stays marked as deleted
+        untouched += [p for p in verdict["keep"] + verdict["leave"] if os.path.lexists(actions.LONG + p)]
+    return {"inner": inner, "untouched": untouched}
 
 
 # ------------------------------------------------------------------------------------------------ the app's API
@@ -270,6 +325,9 @@ class Tasks:
         if task is not None:
             task["stop"] = True
 
+    def running(self):
+        return [task for task in list(self._tasks.values()) if not task["done"]]
+
 
 class Api:
     """What the page can ask for. Each method answers with plain data (pywebview turns it into JSON)."""
@@ -281,6 +339,7 @@ class Api:
         self._tasks = Tasks()
         self._scan = {"running": False}
         self._cancel = None
+        self._closing = False
 
     # -- state
     def state(self, drive=None):
@@ -297,6 +356,7 @@ class Api:
             "scan": loaded.data if loaded else None, "scanId": loaded.id if loaded else None,
             "done": actions_for(loaded.id) if loaded else [],
             "protected": sorted(loaded.guard.never) if loaded else [],
+            "locked": sorted(loaded.guard.locked) if loaded else [],
             "commands": K.COMMANDS, "admin": engine.is_admin(), "theme": settings().get("theme"),
             "scanning": self.scan_status(),
         }
@@ -399,26 +459,38 @@ class Api:
 
     # -- deleting
     def check(self, drive, paths, contents=False):
-        """Before the confirmation: may these be deleted, and what inside them stays?"""
+        """Before the confirmation: may these be deleted, and what else the report lists inside them: what goes with
+        them (also), and what stays (leave: listed on its own with a more careful label; keep: needed)."""
         loaded = self._get(engine.normalize_drive(drive))
         if loaded is None:
             return {"ok": False, "reason": "Scan the drive first."}
         paths = clean_paths(paths)
-        keep, names, missing = [], [], []
+        found, missing = {"also": {}, "leave": {}, "keep": {}}, []
         for p in paths:
             verdict = loaded.guard.check(p, bool(contents))
             if not verdict["ok"]:
                 return {"ok": False, "reason": verdict["reason"], "path": p}
-            keep += verdict["keep"]
-            names += [n for n in verdict["keepNames"] if n not in names]
+            for how, items in found.items():
+                for entry in verdict[how + "Items"]:
+                    same = items.setdefault((entry["name"], entry["safety"]), dict(entry, size=0))
+                    same["size"] = None if same["size"] is None or entry["size"] is None else \
+                        same["size"] + entry["size"]
             if not os.path.lexists(actions.LONG + p):
                 missing.append(p)
         sync = sorted({prov for p in paths for root, prov in loaded.data["meta"].get("syncRoots") or []
                        if actions.inside(actions.norm(p), actions.norm(root))})
-        return {"ok": True, "keep": len(keep), "keepNames": names[:6], "missing": missing, "sync": sync}
+        out = {"ok": True, "missing": missing, "sync": sync}
+        for how, items in found.items():
+            entries = sorted(items.values(), key=lambda e: -(e["size"] or 0))
+            out[how], out[how + "Count"] = entries[:5], len(entries)
+        # what stays inside, at the last scan: the page takes it off the size it shows
+        out["staysSize"] = sum(e["size"] or 0 for how in ("leave", "keep") for e in found[how].values())
+        return out
 
     def delete(self, drive, paths, mode, contents=False):
         """Delete what the person confirmed: mode 'trash' (Recycle Bin) or 'forever'. Returns a task to poll."""
+        if mode not in ("trash", "forever"):
+            return {"ok": False, "error": "Disk Report only moves things to the Recycle Bin or deletes them permanently."}
         loaded = self._get(engine.normalize_drive(drive))
         if loaded is None:
             return {"ok": False, "error": "Scan the drive first."}
@@ -429,47 +501,53 @@ class Api:
             verdict = loaded.guard.check(p, contents)
             if not verdict["ok"]:
                 return {"ok": False, "error": verdict["reason"]}
-            verdicts.append((p, verdict["keep"]))
+            verdicts.append((p, verdict))
         cluster = loaded.data["meta"].get("cluster") or 4096
 
         def work(task):
-            total = {"freed": 0, "files": 0, "inUse": 0, "denied": 0, "kept": 0, "errors": []}
-            states, cancelled = [], False
-            for p, keep in verdicts:
-                if mode == "trash":
-                    result = actions.recycle(parts_to_recycle(p, keep, contents), self._hwnd())
-                    cancelled = cancelled or bool(result.get("cancelled"))
-                    if result.get("error"):
-                        total["errors"].append(result["error"])
-                else:
-                    def progress(counts, done=dict(total)):
-                        task["progress"] = {"files": done["files"] + counts["files"],
-                                            "freed": done["freed"] + counts["freed"]}
-
-                    result = actions.delete_for_good(p, contents, keep, cluster, progress)
-                    for k in ("freed", "files", "inUse", "denied", "kept"):
-                        total[k] += result[k]
-                    total["errors"] += result["errors"]
-                states.append({"path": p, "state": self._state_of(p, mode, contents, result)})
-            record = dict(total, kind="delete", mode=mode, contents=contents, paths=states, cancelled=cancelled,
+            if mode == "trash":
+                record = self._to_recycle_bin(verdicts, contents)
+            else:
+                record = self._delete_for_good(verdicts, contents, cluster, task)
+            record.update(marks(verdicts, mode), kind="delete", mode=mode, contents=contents,
                           drive=loaded.data["meta"]["drive"], scan=loaded.id)
             log_action(record)
             return dict(record, ok=True, usage=usage(loaded.data["meta"]["drive"]))
 
         return {"ok": True, "task": self._tasks.start(work)}
 
+    def _to_recycle_bin(self, verdicts, contents):
+        """Everything confirmed goes to the Recycle Bin in one go: one progress window, whose Cancel stops it all."""
+        pieces, kept, left = {}, 0, 0
+        for p, verdict in verdicts:
+            pieces[p], k, n = parts_to_recycle(p, verdict["keep"], verdict["leave"], contents)
+            kept, left = kept + k, left + n
+        result = actions.recycle([q for found in pieces.values() for q in found], self._hwnd())
+        return {"freed": 0, "files": 0, "inUse": 0, "denied": 0, "kept": kept, "left": left,
+                "errors": [result["error"]] if result.get("error") else [], "cancelled": bool(result.get("cancelled")),
+                "paths": [{"path": p, "state": trash_state(p, pieces[p], contents)} for p, _ in verdicts]}
+
     @staticmethod
-    def _state_of(path, mode, contents, result):
-        exists = os.path.lexists(actions.LONG + path)
-        if mode == "trash":
-            if result.get("cancelled") or result.get("error"):
-                return "failed" if exists and not contents else "partial"
-            return "trashed" if not exists or contents else "partial"
-        if contents:
-            return "emptied" if not (result["inUse"] or result["denied"] or result["errors"]) else "partial"
-        if not exists:
-            return "deleted"
-        return "partial" if result["files"] or result["kept"] else "failed"
+    def _delete_for_good(verdicts, contents, cluster, task):
+        total = {"freed": 0, "files": 0, "inUse": 0, "denied": 0, "kept": 0, "left": 0, "errors": [],
+                 "stopped": False}
+        states = []
+        for p, verdict in verdicts:
+            if total["stopped"]:
+                states.append({"path": p, "state": "failed"})
+                continue
+
+            def progress(counts, done=dict(total)):
+                task["progress"] = {"files": done["files"] + counts["files"], "freed": done["freed"] + counts["freed"]}
+
+            result = actions.delete_for_good(p, contents, verdict["keep"], cluster, progress, leave=verdict["leave"],
+                                             stop=lambda: task["stop"])
+            for k in ("freed", "files", "inUse", "denied", "kept", "left"):
+                total[k] += result[k]
+            total["errors"] += result["errors"]
+            total["stopped"] = result["stopped"]
+            states.append({"path": p, "state": forever_state(p, contents, result)})
+        return dict(total, paths=states)
 
     def delete_as_admin(self, drive, paths, contents=False):
         """The same as delete(..., 'forever'), in a helper Windows starts with administrator rights."""
@@ -477,30 +555,37 @@ class Api:
         if loaded is None:
             return {"ok": False, "error": "Scan the drive first."}
         paths = clean_paths(paths)
+        verdicts = []
         for p in paths:
             verdict = loaded.guard.check(p, bool(contents))
             if not verdict["ok"]:
                 return {"ok": False, "error": verdict["reason"]}
+            verdicts.append((p, verdict))
 
         def work(task):
             os.makedirs(TEMP_DIR, exist_ok=True)
             name = uuid.uuid4().hex
             task_file = os.path.join(TEMP_DIR, name + ".json")
             result_file = os.path.join(TEMP_DIR, name + ".result.json")
-            write_json(task_file, {"scan": os.path.join(SCANS_DIR, loaded.id), "tokens": loaded.tokens,
+            scan_file = os.path.join(SCANS_DIR, loaded.id)
+            write_json(task_file, {"scan": scan_file, "scanHash": sha256(scan_file), "tokens": loaded.tokens,
                                    "own": own_folders(), "paths": list(paths), "contents": bool(contents),
                                    "cluster": loaded.data["meta"].get("cluster") or 4096, "result": result_file})
+            # The task file sits in a folder any program of yours can write to: the helper only acts on it when it
+            # still has the fingerprint taken here, which reaches it on its command line.
+            digest = sha256(task_file)
             if getattr(sys, "frozen", False):
-                program, params = sys.executable, '--elevated "%s"' % task_file
+                program, params = sys.executable, '--elevated "%s" %s' % (task_file, digest)
             else:
-                program, params = sys.executable, '"%s" --elevated "%s"' % (os.path.abspath(__file__), task_file)
+                program, params = sys.executable, '"%s" --elevated "%s" %s' % (os.path.abspath(__file__), task_file,
+                                                                               digest)
             try:
                 handle = actions.start(program, params, admin=True, hwnd=self._hwnd())
             except OSError as e:
                 if getattr(e, "winerror", None) == actions.CANCELLED_BY_USER:
                     return {"ok": False, "cancelled": True}
                 raise
-            actions.wait(handle)
+            code = actions.wait(handle)
             actions.close(handle)
             results = read_json(result_file, []) or []
             for f in (task_file, result_file):
@@ -508,21 +593,25 @@ class Api:
                     os.remove(f)
                 except OSError:
                     pass
-            total = {"freed": 0, "files": 0, "inUse": 0, "denied": 0, "kept": 0, "errors": []}
+            total = {"freed": 0, "files": 0, "inUse": 0, "denied": 0, "kept": 0, "left": 0, "errors": []}
             states = []
             for r in results:
                 if r.get("refused"):
                     total["errors"].append(r["refused"])
                     states.append({"path": r["path"], "state": "failed"})
                     continue
-                for k in ("freed", "files", "inUse", "denied", "kept"):
+                for k in ("freed", "files", "inUse", "denied", "kept", "left"):
                     total[k] += r.get(k, 0)
                 total["errors"] += r.get("errors", [])
-                states.append({"path": r["path"], "state": self._state_of(r["path"], "forever", contents, r)})
-            if not results:
+                states.append({"path": r["path"], "state": forever_state(r["path"], contents, r)})
+            if code == REFUSED:
+                total["errors"].append("The administrator helper refused the task: its file was changed after Disk "
+                                       "Report wrote it.")
+            elif not results:
                 total["errors"].append("The administrator helper didn't report back.")
             record = dict(total, kind="delete", mode="forever", admin=True, contents=bool(contents), paths=states,
                           drive=loaded.data["meta"]["drive"], scan=loaded.id)
+            record.update(marks(verdicts, "forever"))
             log_action(record)
             return dict(record, ok=True, usage=usage(loaded.data["meta"]["drive"]))
 
@@ -546,7 +635,7 @@ class Api:
         def work(task):
             result = actions.empty_recycle_bin(drive, self._hwnd())
             log_action(dict(result, kind="empty-bin", drive=drive, scan=loaded.id if loaded else None))
-            return dict(result, usage=usage(drive))
+            return dict(result, drive=drive, usage=usage(drive))
 
         return {"ok": True, "task": self._tasks.start(work)}
 
@@ -561,14 +650,16 @@ class Api:
         def work(task):
             state, error = self._uninstall(entry, task)
             loaded.guard._installed.pop(group, None)
-            log_action({"kind": "uninstall", "group": group, "name": entry["name"], "state": state, "error": error,
-                        "drive": loaded.data["meta"]["drive"], "scan": loaded.id})
-            return {"ok": state == "removed", "state": state, "error": error, "group": group, "name": entry["name"],
-                    "usage": usage(loaded.data["meta"]["drive"])}
+            log_action({"kind": "uninstall", "group": group, "index": index, "name": entry["name"], "state": state,
+                        "error": error, "drive": loaded.data["meta"]["drive"], "scan": loaded.id})
+            return {"ok": state == "removed", "state": state, "error": error, "group": group, "index": index,
+                    "name": entry["name"], "usage": usage(loaded.data["meta"]["drive"])}
 
         return {"ok": True, "task": self._tasks.start(work)}
 
     def _uninstall(self, entry, task):
+        """Run an app's uninstaller and wait. Answers (state, error): removed; kept (the uninstaller closed and
+        Windows still lists the app); stopped (the person stopped waiting); cancelled; error."""
         if entry["kind"] == "store":
             result = actions.remove_store_app(entry["package"])
             return ("removed", None) if result["ok"] else ("error", result["error"])
@@ -582,21 +673,26 @@ class Api:
             if getattr(e, "winerror", None) == actions.CANCELLED_BY_USER:
                 return "cancelled", None
             return "error", "Windows couldn't start the uninstaller: %s" % (e.strerror or e)
-        started = time.time()
+        # Some uninstallers hand over to a copy of themselves and exit at once, so every process the uninstaller
+        # starts is followed, and what counts in the end is whether Windows still lists the app.
+        tree = actions.ProcessTree(handle)
+        started, closed = time.time(), None
         try:
-            # Some uninstallers hand over to a copy of themselves and exit at once, so what counts is whether
-            # Windows still lists the app, not whether the first process is running.
             while True:
                 if not actions.is_registered(entry["ref"]):
                     return "removed", None
-                if task["stop"]:
+                if task["stop"] or time.time() - started > 3600:
                     return "stopped", None
-                if time.time() - started > 3600:
-                    return "stopped", None
-                running = actions.wait(handle, 1.0) is None
+                running = tree.alive() if tree.root else True   # no process to follow: wait until stopped
                 task["progress"] = {"running": running}
-                if not running:
-                    time.sleep(1.0)
+                if running:
+                    closed = None
+                elif closed is None:
+                    closed = time.time()
+                elif time.time() - closed > UNINSTALL_GRACE:
+                    return "kept", None
+                # often at first, to see the short-lived processes an uninstaller may hand over through
+                time.sleep(0.2 if time.time() - started < 10 else 1.0)
         finally:
             actions.close(handle)
 
@@ -613,22 +709,64 @@ class Api:
         log_action({"kind": "command", "command": command, "scan": None})
         return {"ok": True}
 
+    # -- closing
+    def _on_closing(self):   # with an underscore, so the page can't call it: pywebview offers it public methods
+        """The window's close button. While something is being deleted or uninstalled, the window stays until it's
+        done (a permanent delete stops at once, so does waiting for an uninstaller), so that what happened is in the
+        log; then it closes by itself. Clicking close again closes at once."""
+        busy = self._tasks.running()
+        if not busy or self._closing:
+            return True
+        self._closing = True
+        for task in busy:
+            task["stop"] = True
+        threading.Thread(target=self._close_when_done, daemon=True).start()
+        return False
+
+    def _close_when_done(self):
+        try:
+            self._window.run_js("window.closingSoon && closingSoon()")
+        except Exception:   # the page tells the person why the window stays; nothing else depends on it
+            pass
+        while self._tasks.running():
+            time.sleep(0.2)
+        self._window.destroy()
+
 
 # ------------------------------------------------------------------------------------------------ elevated helper
 
-def elevated(task_file):
-    """Runs with administrator rights: delete what the app asked for, after the same checks, and report back."""
-    task = read_json(task_file)
+def elevated(task_file, digest=""):
+    """Runs with administrator rights: delete what the app asked for, after the same checks, and report back.
+
+    `digest` is the task file's SHA-256, taken by the app and passed on the command line: a task file changed since
+    is refused (exit code REFUSED), and so is a scan file changed after the app wrote the task."""
+    try:
+        with open(task_file, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return REFUSED
+    if not digest or not hmac.compare_digest(hashlib.sha256(raw).hexdigest(), digest.lower()):
+        return REFUSED
+    task = json.loads(raw.decode("utf-8"))
     results = []
     try:
-        scan = read_json(task["scan"])
-        guard = actions.Guard(scan, task["tokens"], task["own"])
+        try:
+            with open(task["scan"], "rb") as f:
+                scan_raw = f.read()
+        except OSError:
+            scan_raw = b""
+        if hashlib.sha256(scan_raw).hexdigest() != task.get("scanHash"):
+            results = [{"path": p, "refused": "The scan changed after Disk Report checked it. Scan again."}
+                       for p in task["paths"]]
+            return 0
+        guard = actions.Guard(json.loads(scan_raw.decode("utf-8")), task["tokens"], task["own"])
         for path in task["paths"]:
             verdict = guard.check(path, task["contents"])
             if not verdict["ok"]:
                 results.append({"path": path, "refused": verdict["reason"]})
                 continue
-            result = actions.delete_for_good(path, task["contents"], verdict["keep"], task["cluster"])
+            result = actions.delete_for_good(path, task["contents"], verdict["keep"], task["cluster"],
+                                             leave=verdict["leave"])
             results.append(dict(result, path=path))
     finally:
         write_json(task["result"], results)
@@ -645,7 +783,7 @@ def page():
 
 def main():
     if len(sys.argv) >= 3 and sys.argv[1] == "--elevated":
-        return elevated(sys.argv[2])
+        return elevated(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "")
     if already_open():
         return 0
     try:
@@ -662,6 +800,7 @@ def main():
     window = webview.create_window(APP_NAME, html=page(), js_api=api, width=1240, height=900, min_size=(760, 560),
                                    text_select=True, background_color="#0d0d0d" if windows_dark() else "#f9f9f7")
     api._window = window
+    window.events.closing += api._on_closing
     webview.start(private_mode=False, storage_path=os.path.join(DATA_DIR, "webview"),
                   icon=ICON if os.path.isfile(ICON) else None, debug=bool(os.environ.get("DISK_REPORT_DEBUG")))
     return 0
