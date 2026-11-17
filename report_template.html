@@ -70,6 +70,9 @@ h1 { font-size: 22px; line-height: 1.25; margin: 2px 0 2px; font-weight: 650; }
 .hero-sub b { color: var(--ink); font-weight: 600; }
 .freed { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--good-ink); background: var(--good-bg);
   border-radius: 999px; padding: 3px 10px 3px 7px; font-weight: 600; align-self: center; }
+#hero-note { display: flex; flex-wrap: wrap; gap: 6px; align-self: center; }
+.stale { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); background: rgba(250, 178, 25, .16);
+  border-radius: 999px; padding: 3px 10px 3px 7px; font-weight: 600; }
 
 /* the drive bar: one whole split into parts */
 .segbar { display: flex; gap: 2px; height: 28px; margin-top: 6px; }
@@ -1014,8 +1017,16 @@ function groupTag(group) {
 }
 const doneTag = s => ` <span class="tag ${s.state === "partial" ? "" : "ok"}">${esc(STATE_LABEL[s.state])}</span>`;
 function rowDeletable(it) {
-  if (!APP || it.container || it.kind === "hidden") return false;
+  if (!APP || it.container || it.kind === "hidden" || uninstallOnly(it)) return false;
   return DELETABLE.has(it.safety) || (it.safety === "uninstall" && groupGone(it.group));
+}
+// program files labelled Optional (the CUDA Toolkit, Nsight…) of an app Windows still lists: they go by uninstalling
+// (caches kept there, like Photoshop's AI models, may still go)
+function uninstallOnly(it) {
+  if (it.safety !== "optional" || it.cat === "cache" || !it.group || (it.flags || []).includes("leftover")) return false;
+  if (!programsOf(it.group).length || groupGone(it.group)) return false;
+  const roots = APP.programRoots || [];
+  return targetsOf(it).some(p => { const key = p.toLowerCase(); return roots.some(r => key.startsWith(r + "\\")); });
 }
 function canDeleteItem(it) {
   if (!rowDeletable(it) || isRecycleBin(it)) return false;
@@ -1088,10 +1099,19 @@ function renderTools() {
       `<option value="${esc(d.drive)}"${d.drive === APP.drive ? " selected" : ""}>${esc(d.drive)} · ${esc(size(d.total))}</option>`).join("")}</select>` : "";
   box.innerHTML = drives + `<button class="btn primary" type="button" data-act="scan"${scanning ? " disabled" : ""}>${ICONS.scan}${scanning ? "Scanning…" : DATA ? "Scan again" : "Scan " + esc(APP.drive)}</button>`;
 }
+const STALE_DAYS = 3;   // from this age on, the app says the scan may be out of date
+function scanAge() {
+  // whole days since the scan was made (M.generated is local time: "2026-11-13 00:43")
+  const made = M && M.generated ? new Date(M.generated.replace(" ", "T")) : null;
+  return made && !isNaN(made) ? Math.floor((Date.now() - made.getTime()) / 86400000) : 0;
+}
 function renderFreed() {
   const el = document.getElementById("hero-note");
-  if (!APP || !DATA || FREED <= 0) { el.innerHTML = ""; return; }
-  el.innerHTML = `<span class="freed">${ICONS.check}You freed ${esc(size(FREED))} since this scan${APP.usage ? ` · ${esc(size(APP.usage.free))} free now` : ""}</span>`;
+  const bits = [];
+  if (APP && DATA && FREED > 0) bits.push(`<span class="freed">${ICONS.check}You freed ${esc(size(FREED))} since this scan${APP.usage ? ` · ${esc(size(APP.usage.free))} free now` : ""}</span>`);
+  const age = APP && DATA ? scanAge() : 0;
+  if (age >= STALE_DAYS) bits.push(`<span class="stale">${ICONS.warn}This scan is ${age} days old: the drive may have changed since. Scan again before deleting.</span>`);
+  el.innerHTML = bits.join("");
 }
 function renderEmpty() {
   const u = APP.usage || { total: 0, used: 0, free: 0 };
@@ -1283,7 +1303,9 @@ async function askDelete(el) {
   }
   ctx.check = check;
   PENDING = ctx;
-  const trashFirst = ctx.dup || !["safe", "optional"].includes(ctx.safety);
+  // things you made or set up (a VM, an emulator, an app's settings): the Recycle Bin first, so they can come back
+  const yours = !!it && (it.flags || []).includes("yours");
+  const trashFirst = ctx.dup || yours || (it && it.cat === "appdata") || !["safe", "optional"].includes(ctx.safety);
   const goes = Math.max(0, ctx.size - (check.staysSize || 0));   // what stays inside isn't part of it
   const what = contents
     ? (paths.length > 1
@@ -1292,7 +1314,10 @@ async function askDelete(el) {
     : paths.length > 1 ? `These ${paths.length} folders and everything in them are deleted.`
     : ctx.file ? "This file is deleted." : "This folder and everything in it are deleted.";
   const warns = [];
+  const age = scanAge();
+  if (age >= STALE_DAYS && ctx.safety !== "safe") warns.push(warnLine(`This scan is ${age} days old: what's on the drive may have changed since. Scan again if you're not sure.`));
   if (ctx.safety === "optional" && it && it.action) warns.push(warnLine(`<b>The trade-off:</b> ${rich(it.action)}`));
+  if (yours) warns.push(warnLine("It holds things you set up yourself, like a virtual machine or an emulator's apps and data. From the Recycle Bin you can still get it back.", ICONS.info));
   if (ctx.safety === "unknown") warns.push(warnLine("Disk Report doesn't know what this is. Make sure nothing you use needs it."));
   if (ctx.dup) warns.push(warnLine("Keep at least one copy. Check that this isn't the copy you use, or a backup you made on purpose.", ICONS.info));
   if (check.also && check.also.length) warns.push(listLine("It also holds these, which the report lists on their own. They go with it:", check.also, check.alsoCount, ICONS.info));
@@ -1361,6 +1386,11 @@ function afterDelete(ctx, res) {
       actions = emptyBin;
     }
     if (res.errors && res.errors.length) msg += " " + esc(res.errors[0]);
+  } else if (!states.length) {
+    // nothing came back about what was done (the administrator helper didn't report): only a new scan can tell
+    kind = "";
+    msg = `${esc((res.errors && res.errors[0]) || "Disk Report doesn't know what was done.")} Scan again to see what was deleted.`;
+    actions = actBtn("scan", `${ICONS.scan}Scan again`, "");
   } else if (res.stopped) {
     kind = "";
     msg = res.files ? `Stopped. ${plural(res.files, "file", "files")} of ${name} ${res.files === 1 ? "was" : "were"} deleted · freed ${esc(size(res.freed))}. The rest is still there.` : "Stopped before anything was deleted.";
@@ -1437,7 +1467,8 @@ async function doUninstall() {
   if (res.state === "removed") {
     markRemoved({ group: p.group, index: p.index, name: p.u.name });
     const others = stillInstalled(p.group);
-    toast(`Uninstalled <b>${esc(p.u.name)}</b>. ` + (others.length
+    const done = res.already ? `<b>${esc(p.u.name)}</b> was already uninstalled, outside Disk Report. ` : `Uninstalled <b>${esc(p.u.name)}</b>. `;
+    toast(done + (others.length
       ? `Still installed in ${esc(p.group)}: ${others.map(esc).join(", ")}, so its folders stay until ${others.length === 1 ? "it's" : "they're"} uninstalled too.`
       : "Its leftover folders can now be deleted here. Scan again to see what it freed."), "good", { actions: actBtn("scan", `${ICONS.scan}Scan again`, "") });
   } else if (res.state === "cancelled") toast("Uninstall cancelled.");

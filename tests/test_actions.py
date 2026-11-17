@@ -530,12 +530,15 @@ class ElevatedHelper(unittest.TestCase):
         self.scan = os.path.join(self.root, "C-2026-01-01_000000.json")
         app.write_json(self.scan, scan_of([{"name": "Tools", "cat": "other", "safety": "unknown",
                                             "paths": [self.target]}]))
-        self.result = os.path.join(self.root, "task.result.json")
+        self.result = os.path.join(os.path.realpath(self.root), "task.result.json")   # resolved, as the app does
         self.task = os.path.join(self.root, "task.json")
+        self.digest = self.write_task(self.result)
+
+    def write_task(self, result):
         app.write_json(self.task, {"scan": self.scan, "scanHash": app.sha256(self.scan),
                                    "tokens": disk_report.path_tokens("C:"), "own": [], "paths": [self.target],
-                                   "contents": False, "cluster": 4096, "result": self.result})
-        self.digest = app.sha256(self.task)
+                                   "contents": False, "cluster": 4096, "result": result})
+        return app.sha256(self.task)
 
     def test_runs_the_task_it_was_given(self):
         self.assertEqual(app.elevated(self.task, self.digest), 0)
@@ -558,6 +561,28 @@ class ElevatedHelper(unittest.TestCase):
         self.assertEqual(app.elevated(self.task, self.digest), 0)
         self.assertIn("refused", app.read_json(self.result)[0])
         self.assertTrue(os.path.isfile(os.path.join(self.target, "old.zip")))
+
+    def test_never_writes_through_a_folder_swapped_for_a_link(self):
+        # the results folder, resolved by the app, was then replaced by a junction to somewhere else
+        elsewhere = os.path.join(self.root, "elsewhere")
+        os.makedirs(elsewhere)
+        swapped = os.path.join(self.root, "results")
+        subprocess.run(["cmd", "/c", "mklink", "/J", swapped, elsewhere], check=True, capture_output=True)
+        digest = self.write_task(os.path.join(swapped, "task.result.json"))
+        self.assertEqual(app.elevated(self.task, digest), app.UNREPORTED)
+        self.assertEqual(os.listdir(elsewhere), [])                 # nothing written, nothing left there
+        self.assertFalse(os.path.exists(self.target))               # the confirmed delete itself was done
+
+    def test_the_app_reports_what_the_helper_could_not(self):
+        api = AppDeleting.api(self, [{"name": "Tools", "cat": "other", "safety": "unknown", "paths": [self.target]}])
+        for code, states in ((app.REFUSED, [{"path": self.target, "state": "failed"}]), (app.UNREPORTED, [])):
+            self.addCleanup(setattr, actions, "start", actions.start)
+            self.addCleanup(setattr, actions, "wait", actions.wait)
+            actions.start = lambda *a, **k: None
+            actions.wait = lambda handle, seconds=None, code=code: code
+            result = AppDeleting.finish(api, api.delete_as_admin("C:", [self.target], False))
+            self.assertEqual(result["paths"], states)
+            self.assertEqual(len(result["errors"]), 1)
 
 
 class Closing(unittest.TestCase):
@@ -619,6 +644,185 @@ class DriveTexts(unittest.TestCase):
         classifier = disk_report.Classifier(tree, "D:", disk_report.path_tokens("D:"), None, None)
         classifier.claim_containers()
         self.assertEqual([i.name for i in classifier.items], ["Files at the top of D:"])
+
+
+class InstalledPrograms(unittest.TestCase):
+    """What Windows lists as installed beats the scan's labels: the scan may be days old."""
+
+    def setUp(self):
+        t = self.t = disk_report.path_tokens("C:")
+        self.pf = t["%PF%"]
+        real = actions.is_registered
+        actions.is_registered = lambda ref: ref.get("key") == "{installed}"
+        self.addCleanup(setattr, actions, "is_registered", real)
+
+    def guard(self, items, installs=None):
+        scan = scan_of(items)
+        scan["apps"] = {"CUDA": [{"name": "NVIDIA CUDA Toolkit 13.1", "kind": "win32", "ref": {"key": "{installed}"}}],
+                        "Gone": [{"name": "Gone 1.0", "kind": "win32", "ref": {"key": "{gone}"}}]}
+        return actions.Guard(scan, self.t, installs=installs)
+
+    def test_optional_program_files_of_an_installed_app_go_by_uninstalling(self):
+        cuda = self.pf + "\\NVIDIA GPU Computing Toolkit"
+        copy = self.pf + "\\Android\\Android Studio1"
+        old = self.pf + "\\Old SDK"
+        models = self.t["%CF%"] + "\\Adobe\\Adobe Photoshop 2026\\AddOnModules\\sensei_model_cache"
+        guard = self.guard([
+            {"name": "NVIDIA CUDA Toolkit", "cat": "dev", "safety": "optional", "group": "CUDA", "paths": [cuda]},
+            {"name": "Android\\Android Studio1", "cat": "app", "safety": "optional", "group": "CUDA",
+             "flags": ["leftover"], "paths": [copy]},
+            {"name": "Old SDK", "cat": "dev", "safety": "optional", "group": "Gone", "paths": [old]},
+            {"name": "Photoshop: AI models", "cat": "cache", "safety": "optional", "group": "CUDA", "paths": [models]}])
+        self.assertTrue(guard.check(models, True)["ok"])  # a cache kept in an installed app's folders may still go
+        verdict = guard.check(cuda)
+        self.assertFalse(verdict["ok"])
+        self.assertIn("Uninstall it instead", verdict["reason"])
+        self.assertFalse(guard.check(cuda + "\\CUDA\\v13.1\\bin")["ok"])
+        self.assertTrue(guard.check(copy)["ok"])        # a left-over copy no app points to may go
+        self.assertTrue(guard.check(old)["ok"])         # its app was uninstalled
+        self.assertIn(actions.norm(self.pf), guard.program_roots)
+
+    def test_programs_installed_since_the_scan(self):
+        tools = "C:\\Tools"
+        app_dir = tools + "\\NewApp"
+        cache = self.t["%LOCAL%"] + "\\SomeApp\\Cache"
+        installs = lambda: [(app_dir, "New App 1.0"), (self.t["%LOCAL%"] + "\\SomeApp", "Some App"),
+                            (self.t["%DOWNLOADS%"], "An odd installer")]
+        guard = self.guard([
+            {"name": "Tools", "cat": "other", "safety": "unknown", "size": 300, "paths": [tools]},
+            {"name": "NewApp", "cat": "other", "safety": "unknown", "paths": [app_dir]},
+            {"name": "SomeApp cache", "cat": "cache", "safety": "safe", "paths": [cache]},
+            {"name": "Downloads", "cat": "user", "safety": "review", "paths": [self.t["%DOWNLOADS%"]]}], installs)
+        verdict = guard.check(app_dir)                  # the scan called it unknown; Windows now lists it
+        self.assertFalse(verdict["ok"])
+        self.assertIn("New App 1.0 is installed there", verdict["reason"])
+        verdict = guard.check(tools)                    # a folder that holds it: deleted around it
+        self.assertTrue(verdict["ok"])
+        self.assertEqual(verdict["keep"], [actions.norm(app_dir)])
+        self.assertTrue(guard.check(cache, True)["ok"]) # a cache inside an installed app's folder may still go
+        self.assertTrue(guard.check(self.t["%DOWNLOADS%"] + "\\setup.exe")["ok"])   # folders never deleted: ignored
+
+    def test_unlisted_installed_folders_are_named_and_left_alone(self):
+        tools = "C:\\Tools"
+        guard = self.guard([{"name": "Tools", "cat": "other", "safety": "unknown", "paths": [tools]}],
+                           lambda: [(tools + "\\Fresh", "Fresh App")])
+        verdict = guard.check(tools)
+        self.assertEqual(verdict["keepItems"], [{"name": "Fresh App", "safety": "keep", "size": None}])
+
+    def test_the_app_deletes_around_a_program_installed_since(self):
+        root = tempfile.mkdtemp(prefix="disk-report-test-")
+        self.addCleanup(shutil.rmtree, root, True)
+        tools, fresh = os.path.join(root, "Tools"), os.path.join(root, "Tools", "Fresh")
+        write(os.path.join(tools, "old.zip"))
+        write(os.path.join(fresh, "fresh.exe"))
+        real = app.installed_programs
+        app.installed_programs = lambda drive, tokens: [(fresh, "Fresh App")]
+        self.addCleanup(setattr, app, "installed_programs", real)
+        api = AppDeleting.api(self, [{"name": "Tools", "cat": "other", "safety": "unknown", "paths": [tools]}])
+        result = AppDeleting.finish(api, api.delete("C:", [tools], "forever", False))
+        self.assertTrue(os.path.isfile(os.path.join(fresh, "fresh.exe")))
+        self.assertFalse(os.path.exists(os.path.join(tools, "old.zip")))
+        self.assertEqual((result["paths"][0]["state"], result["kept"]), ("partial", 1))
+
+
+class CarriedOver(unittest.TestCase):
+    """What was done while a scan was being made shows in that new scan's report."""
+
+    def test_actions_during_the_scan_are_carried_over(self):
+        self.addCleanup(lambda: os.path.exists(app.LOG_FILE) and os.remove(app.LOG_FILE))
+        if os.path.exists(app.LOG_FILE):
+            os.remove(app.LOG_FILE)
+        started = 1_700_000_000.0
+        for record in ({"kind": "delete", "drive": "C:", "scan": "old", "time": started - 50, "paths": ["before"]},
+                       {"kind": "delete", "drive": "C:", "scan": "old", "time": started + 30, "paths": ["during"]},
+                       {"kind": "uninstall", "drive": "C:", "scan": "old", "time": started + 40, "index": 3,
+                        "name": "Discord", "state": "removed"},
+                       {"kind": "delete", "drive": "D:", "scan": "d-old", "time": started + 30, "paths": ["other"]},
+                       {"kind": "command", "scan": None, "time": started + 30, "command": "npm cache clean --force"},
+                       {"kind": "delete", "drive": "C:", "scan": "new", "time": started + 500, "paths": ["after"]}):
+            with open(app.LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record) + "\n")
+        done = app.actions_for("new", "C:", started)
+        self.assertEqual([r.get("paths") or r.get("name") for r in done], [["during"], "Discord", ["after"]])
+        self.assertNotIn("index", done[1])             # matched by name: its place in the list was the old scan's
+        self.assertEqual(len(app.actions_for("new")), 1)
+
+    def test_when_a_scan_started(self):
+        self.assertEqual(app.scan_started({"started": 123.5, "generated": "2026-11-17 10:00", "seconds": 60}), 123.5)
+        ended = app.dt.datetime(2026, 11, 17, 10, 0).timestamp()
+        self.assertEqual(app.scan_started({"generated": "2026-11-17 10:00", "seconds": 150}), ended - 150)
+        self.assertIsNone(app.scan_started({}))
+
+
+class Labels(unittest.TestCase):
+    """Labels the scan gives: old IDE settings, things you made, Docker's disk."""
+
+    def classifier(self, apps=()):
+        info = type("Info", (), {})()
+        info.apps = disk_report.AppIndex()
+        for name in apps:
+            info.apps.add(name, "")
+        tokens = disk_report.path_tokens("C:")
+        return disk_report.Classifier(disk_report.Node("C:"), "C:", tokens, info, None), tokens
+
+    @staticmethod
+    def tree(cls, path):
+        """Hang folders for `path` in the classifier's tree."""
+        node = cls.tree
+        for part in path[len("C:\\"):].split("\\"):
+            node.kids = node.kids or {}
+            node = node.kids.setdefault(part.lower(), disk_report.Node(part))
+
+    def test_old_ide_settings_are_optional_and_old_caches_safe(self):
+        cls, t = self.classifier()
+        made = {}
+        for where, cat, safety in (("%ROAMING%", catalog.APPDATA, catalog.KEEP), ("%LOCAL%", catalog.CACHE, catalog.SAFE)):
+            for version in ("2024.3.2", "2026.1.2"):
+                path = t[where] + "\\Google\\AndroidStudio" + version
+                item = cls.new("x", cat, safety, "x")
+                cls.special_ide_versions(item, disk_report.Node("AndroidStudio" + version), path, [])
+                made[(cat, version)] = item
+        cls.finish_ide_versions()
+        self.assertEqual(made[(catalog.APPDATA, "2024.3.2")].safety, catalog.OPTIONAL)
+        self.assertEqual(made[(catalog.CACHE, "2024.3.2")].safety, catalog.SAFE)
+        self.assertEqual(made[(catalog.APPDATA, "2026.1.2")].safety, catalog.KEEP)     # the current one stays
+
+    def rule(self, name):
+        return next(r for r in catalog.RULES if r["name"] == name)
+
+    def test_things_you_made_are_marked(self):
+        cls, t = self.classifier()
+        self.tree(cls, t["~"] + "\\VirtualBox VMs\\Work VM")
+        cls.apply(self.rule("VirtualBox VM: {0}"))
+        self.assertIn("yours", cls.items[0].flags)
+        for name in ("VirtualBox VMs", "VMware VM: {0}", "Hyper-V disk: {0}", "Android emulator: {0}"):
+            self.assertTrue(self.rule(name)["yours"], name)
+
+    def test_dockers_disk_is_kept_while_docker_is_installed(self):
+        for apps, safety in ((["Docker Desktop"], catalog.KEEP), ([], catalog.OPTIONAL)):
+            cls, t = self.classifier(apps)
+            self.tree(cls, t["%LOCAL%"] + "\\Docker\\wsl")
+            cls.apply(self.rule("Docker images, containers & volumes"))
+            self.assertEqual(cls.items[0].safety, safety, apps)
+            self.assertIn("yours", cls.items[0].flags)
+
+
+class UninstallGone(unittest.TestCase):
+    def test_an_app_already_removed_counts_as_uninstalled(self):
+        root = tempfile.mkdtemp(prefix="disk-report-test-")
+        self.addCleanup(shutil.rmtree, root, True)
+        api = AppDeleting.api(self, [])
+        scan_file = os.path.join(app.SCANS_DIR, "C-2026-01-01_000000.json")
+        scan = app.read_json(scan_file)
+        scan["apps"] = {"Gone": [{"name": "Gone 1.0", "kind": "win32",
+                                  "ref": {"hive": "HKCU", "view": 0, "key": "{disk-report-test-not-there}"}}],
+                        "Store": [{"name": "Store App", "kind": "store", "package": "Some.App_1.0_x64__abc",
+                                   "dir": os.path.join(root, "not there")}]}
+        app.write_json(scan_file, scan)
+        api = app.Api()
+        for group in ("Gone", "Store"):
+            result = AppDeleting.finish(api, api.uninstall("C:", group, 0))
+            self.assertEqual((result["state"], result["already"], result["error"]), ("removed", True, None), group)
 
 
 class RecycleBin(unittest.TestCase):

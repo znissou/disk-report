@@ -12,6 +12,8 @@ AppId={{8F3D2A61-6C3B-4E2A-9B7E-2D7C9E5A1B44}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
+; the installer's own file version, in Properties > Details (numbers only, like 2.0.1)
+VersionInfoVersion={#AppVersion}
 AppPublisher=disk-report
 AppPublisherURL=https://github.com/znissou/disk-report
 AppSupportURL=https://github.com/znissou/disk-report/issues

@@ -947,6 +947,8 @@ class Classifier:
             self.claim(path, node, item)
             if rule["split"]:
                 item.flags.add("split")
+            if rule["yours"]:
+                item.flags.add("yours")
             if rule["special"]:
                 getattr(self, "special_" + rule["special"])(item, node, path, caps)
             if rule["needs"] and not self.info.apps.has(rule["needs"]):
@@ -1019,8 +1021,13 @@ class Classifier:
             for _, item in found[:-1]:
                 item.flags.add("leftover")
                 item.notes.append("This is from an older version you no longer use.")
-                item.safety = K.SAFE
-                item.action = "Delete the folder: the current version keeps its own copy."
+                if item.cat == K.CACHE:      # caches and indexes: rebuilt, nothing is lost
+                    item.safety = K.SAFE
+                    item.action = "Delete the folder: the current version keeps its own copy."
+                else:                        # settings and plugins: not downloaded again, so they're a trade-off
+                    item.safety = K.OPTIONAL
+                    item.action = ("Delete it once the current version has your settings and plugins: it copies "
+                                   "them from the previous version the first time it starts.")
 
     # -- installed apps
     def claim_registry(self):
@@ -1590,8 +1597,10 @@ def run(drive, progress=None, cancel=None):
     dupes = find_duplicates(cls, scanner, info)
     dup_folders = find_duplicate_folders(cls, info)
 
-    return build_data(cls, scanner, info, (usage.total, usage.used, usage.free), drive, time.time() - started,
+    data = build_data(cls, scanner, info, (usage.total, usage.used, usage.free), drive, time.time() - started,
                       saved, dupes, dup_folders)
+    data["meta"]["started"] = round(started, 3)   # the app carries over what was done on the drive from then on
+    return data
 
 
 def main():

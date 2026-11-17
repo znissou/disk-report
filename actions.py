@@ -11,6 +11,7 @@ takes Optional AI models with it).
 from __future__ import annotations
 
 import ctypes
+import msvcrt
 import os
 import re
 import stat
@@ -63,6 +64,53 @@ def size_on_disk(n, cluster):
 
 def is_link(st):
     return bool(st.st_file_attributes & REPARSE and st.st_reparse_tag & NAME_SURROGATE)
+
+
+kernel32.GetFinalPathNameByHandleW.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+kernel32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+
+
+def plain_path(path):
+    """'\\\\?\\C:\\x' -> 'C:\\x', '\\\\?\\UNC\\server\\share' -> '\\\\server\\share'."""
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[8:]
+    return path[4:] if path.startswith("\\\\?\\") else path
+
+
+def final_path(fd):
+    """Where an open file really is, with every link and junction on the way resolved, or None."""
+    handle = msvcrt.get_osfhandle(fd)
+    size = 512
+    while True:
+        buf = ctypes.create_unicode_buffer(size)
+        n = kernel32.GetFinalPathNameByHandleW(handle, buf, size, 0)
+        if not n:
+            return None
+        if n < size:
+            return plain_path(buf.value)
+        size = n + 1
+
+
+def write_new(path, data):
+    """Write bytes to a new file at `path` (already resolved), only if that's really where it lands. When a folder on
+    the way was swapped for a link since, the file is removed again and the answer is False. The administrator helper
+    writes this way, in a folder any program of yours can change."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_BINARY)
+    try:
+        real = final_path(fd)
+        here = real is not None and os.path.normcase(real) == os.path.normcase(plain_path(os.path.normpath(path)))
+        if here:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
+    finally:
+        os.close(fd)
+    if not here and real:
+        try:
+            os.remove(real)       # the empty file it just made elsewhere, and only that
+        except OSError:
+            pass
+    return here
 
 
 def is_system(path):
@@ -603,9 +651,13 @@ class Guard:
     keep: needed by Windows or an installed app, left alone;
     leave: listed on its own with a more careful label than the path's own, left alone too;
     also: the other listed things it holds, which go with it.
+
+    The scan may be days old. `installs`, when given, answers [(folder, program name)] for the programs Windows lists
+    as installed right now: a path in one of those folders is refused (caches excepted), and those folders inside a
+    path are left alone, whatever the scan says.
     """
 
-    def __init__(self, scan, tokens, own=()):
+    def __init__(self, scan, tokens, own=(), installs=None):
         meta = scan["meta"]
         self.drive = meta["drive"].upper()
         self.root = norm(self.drive + "\\")
@@ -639,6 +691,10 @@ class Guard:
         # other accounts' folders: nothing inside them is deleted either, so the page offers no Delete there
         self.locked = {key for key in self.claims if key.rsplit("\\", 1)[0] == self.users and
                        self.account(key) not in (self.me, "public", "default")}
+        # where programs are installed: there, the files of an app Windows still lists only go by uninstalling it
+        self.program_roots = [norm(t[k]) for k in ("%PF%", "%PF86%") if k in t] + [norm(t["%LOCAL%"] + "\\Programs")]
+        self._installs = installs
+        self._live = None
         self._installed = {}
 
     def owner(self, key):
@@ -676,6 +732,28 @@ class Guard:
         return bool(item.get("container") or item.get("safety") == "keep" or
                     (item.get("safety") == "uninstall" and self.installed(item.get("group"))))
 
+    def registered(self, group):
+        """Whether an app group has programs the scan found in Windows' list, and Windows still lists one of them."""
+        return bool(group and self.apps.get(group)) and self.installed(group)
+
+    def uninstall_only(self, item, key):
+        """Program files labelled Optional (the CUDA Toolkit, Nsight, the Windows SDK…) of an app Windows still
+        lists as installed: like those labelled "uninstall", they go by uninstalling, unless they're a left-over copy.
+        Caches kept there (Photoshop's AI models) are not program files: they may go."""
+        return item.get("safety") == "optional" and item.get("cat") != "cache" and \
+            "leftover" not in (item.get("flags") or []) and \
+            any(inside(key, p) for p in self.program_roots) and self.registered(item.get("group"))
+
+    def live_programs(self):
+        """[(folder, program)] for the programs Windows lists as installed right now, read again after a few seconds,
+        without the folders Disk Report never deletes anyway (an installer may name Downloads or the like)."""
+        if self._installs is None:
+            return []
+        if self._live is None or time.time() - self._live[1] > 5:
+            found = [(norm(folder), name) for folder, name in self._installs()]
+            self._live = ([(f, n) for f, n in found if f not in self.never and f != self.root], time.time())
+        return self._live[0]
+
     def check(self, path, contents_only=False):
         if not path or not os.path.isabs(path) or path.startswith("\\\\") or ".." in path.split("\\"):
             return {"ok": False, "reason": "That isn't a path Disk Report can act on."}
@@ -700,9 +778,14 @@ class Guard:
             return {"ok": False, "reason": "Microsoft Store apps are removed by uninstalling them."}
         if item.get("container") or safety == "keep":
             return {"ok": False, "reason": "“%s” is needed by Windows or by an app you use." % name}
-        if safety == "uninstall" and self.installed(item.get("group")):
+        if (safety == "uninstall" and self.installed(item.get("group"))) or self.uninstall_only(item, key):
             return {"ok": False, "reason": "%s is still installed. Uninstall it instead: deleting its folders by "
                                            "hand can break it." % (item.get("group") or name)}
+        if item.get("cat") != "cache":          # caches inside an app's folder (Steam's shader cache) may go
+            for folder, program in self.live_programs():
+                if inside(key, folder):
+                    return {"ok": False, "reason": "%s is installed there. Uninstall it instead: deleting its folders "
+                                                   "by hand can break it." % program}
         if inside(key, self.windows) and safety not in ("safe", "optional"):
             return {"ok": False, "reason": "Disk Report only deletes the parts of Windows its catalog says are safe."}
         if any(inside(key, p) for p in self.programs) and safety not in ("safe", "optional", "unknown"):
@@ -716,11 +799,18 @@ class Guard:
         """What else the report lists inside `key`: what stays (keep, leave) and what goes with it (also)."""
         mine = CAUTION.get(item.get("safety"), 2)
         found = {"keep": [], "leave": [], "also": []}
+        live = [(f, program) for f, program in self.live_programs() if f.startswith(key + "\\")]
         for claimed, other in self.claims.items():
             if other is item or not claimed.startswith(key + "\\"):
                 continue
-            how = "keep" if self.needed(other) else "leave" if CAUTION.get(other.get("safety"), 2) > mine else "also"
+            if self.needed(other) or any(inside(claimed, f) for f, _ in live):
+                how = "keep"
+            else:
+                how = "leave" if CAUTION.get(other.get("safety"), 2) > mine else "also"
             found[how].append((claimed, other))
+        # programs Windows lists as installed in there that the scan didn't list (installed since it ran)
+        found["keep"] += [(f, {"name": program, "safety": "keep", "live": True}) for f, program in live
+                          if f not in self.claims]
         stays = [c for c, _ in found["keep"] + found["leave"]]
         out = {}
         for how, pairs in found.items():
@@ -739,7 +829,7 @@ class Guard:
         for claimed, item in pairs:
             entry = by_item.setdefault(id(item), {"name": item.get("name", ""), "safety": item.get("safety"),
                                                   "size": 0})
-            bytes_ = size_under(claimed, item)
+            bytes_ = None if item.get("live") else size_under(claimed, item)   # not in the scan: size unknown
             entry["size"] = None if bytes_ is None or entry["size"] is None else entry["size"] + bytes_
         return sorted(by_item.values(), key=lambda e: -(e["size"] or 0))
 

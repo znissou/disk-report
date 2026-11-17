@@ -75,7 +75,8 @@ What the app never does:
   Downloads, Desktop… folders themselves (only things inside them), nor anything labelled **Keep**.
 - It never deletes another account's files, nor what Windows marks as protected system files at the top of
   the drive.
-- It never deletes the folders of an app that's still installed: you uninstall the app instead.
+- It never deletes the folders of an app that's still installed: you uninstall the app instead. Before every
+  delete it reads Windows' list of installed apps again, so an app installed since the scan is safe too.
 - When a folder you delete holds other things the report lists, the confirmation names them with their size.
   Those Windows or an installed app needs are left alone, and so are those with a more careful label than the
   folder: a cache that's **Safe to clean** never takes **Optional** AI models with it.

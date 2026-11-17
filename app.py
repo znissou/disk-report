@@ -45,6 +45,7 @@ MUTEX = "DiskReportApp"
 # before Disk Report says it's still installed (some uninstallers hand over to a program that's already running).
 UNINSTALL_GRACE = 60
 REFUSED = 2          # the administrator helper's exit code when its task file changed after the app wrote it
+UNREPORTED = 3       # ... and when its results folder was swapped for a link while it worked, so it reported nothing
 
 
 # ------------------------------------------------------------------------------------------------ files
@@ -120,8 +121,22 @@ def log_action(record):
         log_error("writing the action log")
 
 
-def actions_for(scan_id):
-    """What was done since a scan, so the report can show it again after a restart."""
+def scan_started(meta):
+    """When a scan began (seconds since 1970). Newer scans save it; for older ones it's worked out from when the scan
+    ended (to the minute) and how long it took, which errs on the early side."""
+    if meta.get("started"):
+        return meta["started"]
+    try:
+        ended = dt.datetime.strptime(meta["generated"], "%Y-%m-%d %H:%M").timestamp()
+    except (KeyError, TypeError, ValueError):
+        return None
+    return ended - (meta.get("seconds") or 0)
+
+
+def actions_for(scan_id, drive=None, since=None):
+    """What was done since a scan, so the report can show it again after a restart: what was logged for this scan,
+    and what was done on its drive while it was being made (logged for the scan before it, which the page showed
+    meanwhile). For those, an uninstalled app is matched by name: its place in the list is the other scan's."""
     out = []
     try:
         with open(LOG_FILE, encoding="utf-8") as f:
@@ -132,9 +147,21 @@ def actions_for(scan_id):
                     continue
                 if record.get("scan") == scan_id:
                     out.append(record)
+                elif since is not None and drive and record.get("scan") and record.get("drive") == drive and \
+                        (record.get("time") or 0) >= since:
+                    record.pop("index", None)
+                    out.append(record)
     except OSError:
         pass
     return out
+
+
+def installed_programs(drive, tokens):
+    """[(folder, name)] for the programs Windows lists as installed, read from the registry now (a few hundredths of a
+    second): the guard checks them before each delete, as the scan may be days old."""
+    info = engine.SysInfo(drive, tokens)
+    info.read_uninstall()
+    return [(e["dir"], e["name"]) for e in info.uninstall if e["dir"]]
 
 
 # ------------------------------------------------------------------------------------------------ Windows facts
@@ -286,8 +313,10 @@ class Loaded:
     def __init__(self, scan_id, data):
         self.id = scan_id
         self.data = data
-        self.tokens = engine.path_tokens(data["meta"]["drive"])
-        self.guard = actions.Guard(data, self.tokens, own_folders())
+        drive = data["meta"]["drive"]
+        self.tokens = engine.path_tokens(drive)
+        self.guard = actions.Guard(data, self.tokens, own_folders(),
+                                   installs=lambda: installed_programs(drive, self.tokens))
 
 
 class Tasks:
@@ -354,9 +383,11 @@ class Api:
         return {
             "version": engine.VERSION, "drives": drives, "drive": drive, "usage": usage(drive),
             "scan": loaded.data if loaded else None, "scanId": loaded.id if loaded else None,
-            "done": actions_for(loaded.id) if loaded else [],
+            "done": actions_for(loaded.id, loaded.data["meta"]["drive"], scan_started(loaded.data["meta"]))
+            if loaded else [],
             "protected": sorted(loaded.guard.never) if loaded else [],
             "locked": sorted(loaded.guard.locked) if loaded else [],
+            "programRoots": loaded.guard.program_roots if loaded else [],
             "commands": K.COMMANDS, "admin": engine.is_admin(), "theme": settings().get("theme"),
             "scanning": self.scan_status(),
         }
@@ -566,7 +597,8 @@ class Api:
             os.makedirs(TEMP_DIR, exist_ok=True)
             name = uuid.uuid4().hex
             task_file = os.path.join(TEMP_DIR, name + ".json")
-            result_file = os.path.join(TEMP_DIR, name + ".result.json")
+            # resolved now, so the helper can tell if the folder is swapped for a link before it writes its results
+            result_file = os.path.join(os.path.realpath(TEMP_DIR), name + ".result.json")
             scan_file = os.path.join(SCANS_DIR, loaded.id)
             write_json(task_file, {"scan": scan_file, "scanHash": sha256(scan_file), "tokens": loaded.tokens,
                                    "own": own_folders(), "paths": list(paths), "contents": bool(contents),
@@ -604,9 +636,13 @@ class Api:
                     total[k] += r.get(k, 0)
                 total["errors"] += r.get("errors", [])
                 states.append({"path": r["path"], "state": forever_state(r["path"], contents, r)})
-            if code == REFUSED:
+            if code == REFUSED:          # it touched nothing
                 total["errors"].append("The administrator helper refused the task: its file was changed after Disk "
                                        "Report wrote it.")
+                states = [{"path": p, "state": "failed"} for p in paths]
+            elif code == UNREPORTED:
+                total["errors"].append("The administrator helper didn't report back: Disk Report's temporary folder "
+                                       "was changed while it worked.")
             elif not results:
                 total["errors"].append("The administrator helper didn't report back.")
             record = dict(total, kind="delete", mode="forever", admin=True, contents=bool(contents), paths=states,
@@ -649,22 +685,32 @@ class Api:
 
         def work(task):
             state, error = self._uninstall(entry, task)
+            already = state == "already"
+            if already:              # gone before the click: as good as uninstalled, and remembered as such
+                state = "removed"
             loaded.guard._installed.pop(group, None)
             log_action({"kind": "uninstall", "group": group, "index": index, "name": entry["name"], "state": state,
-                        "error": error, "drive": loaded.data["meta"]["drive"], "scan": loaded.id})
-            return {"ok": state == "removed", "state": state, "error": error, "group": group, "index": index,
-                    "name": entry["name"], "usage": usage(loaded.data["meta"]["drive"])}
+                        "already": already, "error": error, "drive": loaded.data["meta"]["drive"], "scan": loaded.id})
+            return {"ok": state == "removed", "state": state, "already": already, "error": error, "group": group,
+                    "index": index, "name": entry["name"], "usage": usage(loaded.data["meta"]["drive"])}
 
         return {"ok": True, "task": self._tasks.start(work)}
 
     def _uninstall(self, entry, task):
-        """Run an app's uninstaller and wait. Answers (state, error): removed; kept (the uninstaller closed and
-        Windows still lists the app); stopped (the person stopped waiting); cancelled; error."""
+        """Run an app's uninstaller and wait. Answers (state, error): removed; already (it was gone before, removed
+        outside Disk Report); kept (the uninstaller closed and Windows still lists the app); stopped (the person
+        stopped waiting); cancelled; error."""
         if entry["kind"] == "store":
+            if not actions.store_app_installed(entry["package"], entry.get("dir")):
+                return "already", None
             result = actions.remove_store_app(entry["package"])
             return ("removed", None) if result["ok"] else ("error", result["error"])
+        if not actions.is_registered(entry["ref"]):
+            return "already", None
         try:
             program, params = actions.uninstall_command(entry["ref"])
+        except FileNotFoundError:    # removed between the two looks
+            return "already", None
         except (OSError, LookupError) as e:
             return "error", str(e)
         try:
@@ -739,7 +785,8 @@ def elevated(task_file, digest=""):
     """Runs with administrator rights: delete what the app asked for, after the same checks, and report back.
 
     `digest` is the task file's SHA-256, taken by the app and passed on the command line: a task file changed since
-    is refused (exit code REFUSED), and so is a scan file changed after the app wrote the task."""
+    is refused (exit code REFUSED), and so is a scan file changed after the app wrote the task. The results go to a
+    new file at the path the app resolved, never through a folder swapped for a link since (exit code UNREPORTED)."""
     try:
         with open(task_file, "rb") as f:
             raw = f.read()
@@ -758,19 +805,21 @@ def elevated(task_file, digest=""):
         if hashlib.sha256(scan_raw).hexdigest() != task.get("scanHash"):
             results = [{"path": p, "refused": "The scan changed after Disk Report checked it. Scan again."}
                        for p in task["paths"]]
-            return 0
-        guard = actions.Guard(json.loads(scan_raw.decode("utf-8")), task["tokens"], task["own"])
-        for path in task["paths"]:
-            verdict = guard.check(path, task["contents"])
-            if not verdict["ok"]:
-                results.append({"path": path, "refused": verdict["reason"]})
-                continue
-            result = actions.delete_for_good(path, task["contents"], verdict["keep"], task["cluster"],
-                                             leave=verdict["leave"])
-            results.append(dict(result, path=path))
+        else:
+            scan = json.loads(scan_raw.decode("utf-8"))
+            guard = actions.Guard(scan, task["tokens"], task["own"],
+                                  installs=lambda: installed_programs(scan["meta"]["drive"], task["tokens"]))
+            for path in task["paths"]:
+                verdict = guard.check(path, task["contents"])
+                if not verdict["ok"]:
+                    results.append({"path": path, "refused": verdict["reason"]})
+                    continue
+                result = actions.delete_for_good(path, task["contents"], verdict["keep"], task["cluster"],
+                                                 leave=verdict["leave"])
+                results.append(dict(result, path=path))
     finally:
-        write_json(task["result"], results)
-    return 0
+        reported = actions.write_new(task["result"], json.dumps(results, ensure_ascii=False).encode("utf-8"))
+    return 0 if reported else UNREPORTED
 
 
 # ------------------------------------------------------------------------------------------------ window

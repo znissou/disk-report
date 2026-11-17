@@ -39,10 +39,13 @@ KEEP = "keep"            # needed
 UNKNOWN = "unknown"      # not recognised
 
 
-def R(path, name, cat, safety, desc, action=None, group=None, merge=None, special=None, needs=None, split=False):
-    """split=True: installed programs found inside this folder are listed as their own items."""
+def R(path, name, cat, safety, desc, action=None, group=None, merge=None, special=None, needs=None, split=False,
+      yours=False):
+    """split=True: installed programs found inside this folder are listed as their own items.
+    yours=True: it holds things you made or set up (a virtual machine, an emulator's apps and data): deleting it
+    suggests the Recycle Bin first."""
     return {"path": path, "name": name, "cat": cat, "safety": safety, "desc": desc, "action": action,
-            "group": group, "merge": merge, "special": special, "needs": needs, "split": split}
+            "group": group, "merge": merge, "special": special, "needs": needs, "split": split, "yours": yours}
 
 
 SETTINGS_TEMP = "Settings → System → Storage → Temporary files"
@@ -98,11 +101,12 @@ RULES = [
     R("~\\VirtualBox VMs\\*", "VirtualBox VM: {0}", DEV, OPTIONAL,
       "The disk and snapshots of a VirtualBox virtual machine.",
       "In VirtualBox: right-click the VM → Remove → Delete all files. Deleting old snapshots also shrinks it.",
-      "VirtualBox"),
+      "VirtualBox", yours=True),
     R("~\\VirtualBox VMs", "VirtualBox VMs", DEV, OPTIONAL, "Folder holding VirtualBox virtual machines.",
-      None, "VirtualBox"),
+      None, "VirtualBox", yours=True),
     R("%DOCUMENTS%\\Virtual Machines\\*", "VMware VM: {0}", DEV, OPTIONAL,
-      "The disk of a VMware virtual machine.", "In VMware: right-click the VM → Manage → Delete from Disk."),
+      "The disk of a VMware virtual machine.", "In VMware: right-click the VM → Manage → Delete from Disk.",
+      yours=True),
     R("%ROOT%\\$Recycle.Bin", "Recycle Bin", CACHE, SAFE,
       "Files you deleted. They keep using space until the Recycle Bin is emptied.",
       "Right-click the Recycle Bin on the desktop → Empty Recycle Bin."),
@@ -211,7 +215,7 @@ RULES = [
       SETTINGS_TEMP + " → 'Windows error reports and feedback diagnostics'."),
     R("%PD%\\Microsoft\\Windows Defender", "Microsoft Defender", SYSTEM, KEEP, "Antivirus definitions and scan data."),
     R("%PD%\\Microsoft\\Windows\\Virtual Hard Disks\\*", "Hyper-V disk: {0}", DEV, OPTIONAL,
-      "Disk of a Hyper-V virtual machine.", "Delete the VM in Hyper-V Manager, then this disk."),
+      "Disk of a Hyper-V virtual machine.", "Delete the VM in Hyper-V Manager, then this disk.", yours=True),
     R("%PD%\\Microsoft", "Windows & Microsoft shared data", SYSTEM, KEEP, "Shared data of Windows features.", split=True),
     R("%PD%\\Packages", "Store apps shared data", SYSTEM, KEEP, "Data Microsoft Store apps share between accounts."),
     R("%PD%\\OEM", "PC maker data", SYSTEM, KEEP, "Data from your PC's maker."),
@@ -414,7 +418,7 @@ RULES = [
     R(r"~\.android\avd\*.avd", "Android emulator: {0}", DEV, OPTIONAL,
       "The disk of an Android emulator: the apps and data inside it.",
       "Android Studio → Device Manager → ⋮ next to the device → Delete. 'Wipe Data' shrinks it instead.",
-      "Android SDK", special="avd"),
+      "Android SDK", special="avd", yours=True),
     R(r"~\.android\cache", "Android tools cache", CACHE, SAFE, "Cache of the Android SDK tools.", "Delete the folder.",
       "Android SDK"),
     R(r"~\.android", "Android tools settings", DEV, KEEP, "Settings, debug keys and emulators of the Android tools.",
@@ -513,12 +517,13 @@ RULES = [
       "Run `dotnet nuget locals all --clear`.", ".NET"),
 
     # ------------------------------------------------------------------ Docker, WSL
-    R(r"%LOCAL%\Docker\wsl", "Docker images, containers & volumes", DEV, OPTIONAL,
-      "Docker's virtual disk: every image, container, volume and build cache.",
+    # Kept like the WSL disks below: Docker Desktop runs from it, so it shrinks through Docker, not by deleting it
+    R(r"%LOCAL%\Docker\wsl", "Docker images, containers & volumes", DEV, KEEP,
+      "Docker's virtual disk: every image, container, volume and build cache. Docker Desktop runs from it.",
       "`docker system df` shows what's inside. `docker system prune` removes stopped containers and dangling "
       "images (add `-a` for every unused image; volumes only with `--volumes`). The disk file may not shrink by "
       "itself afterwards: Docker Desktop → Troubleshoot → 'Clean / Purge data' empties it completely.",
-      "Docker Desktop"),
+      "Docker Desktop", needs="docker", yours=True),
     R(r"%LOCAL%\Docker", "Docker Desktop data", APPDATA, KEEP, "Settings and logs of Docker Desktop.", None,
       "Docker Desktop"),
     R(r"%LOCAL%\Packages\CanonicalGroupLimited.*\LocalState", "Linux (WSL) disk", DEV, KEEP,
