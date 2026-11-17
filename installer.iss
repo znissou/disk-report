@@ -2,7 +2,7 @@
 ; Installs for the current account only (no administrator rights needed), in %LOCALAPPDATA%\Programs\Disk Report.
 
 #ifndef AppVersion
-  #define AppVersion "2.0.1"
+  #define AppVersion "2.0.2"
 #endif
 #define AppName "Disk Report"
 #define AppExe "Disk Report.exe"
