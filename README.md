@@ -57,7 +57,8 @@ Open any item to see what it is, and act on it right there, one thing at a time:
 
 - **Open in Explorer** the folder, or any file or folder listed inside it.
 - **Delete** a cache, a leftover, a big file, an extra copy of a duplicate. You choose **Move to Recycle Bin**
-  (you can restore it) or **Delete permanently** (the space is freed now, and you can stop it midway). Caches are
+  (you can restore it, and the report notices when you do) or **Delete permanently** (the space is freed now, and
+  you can stop it midway). Caches are
   emptied in place: the folder stays and the app fills it again when it needs to. Files in use are skipped and
   counted; if Windows needs administrator rights for some of them, the app offers to finish as administrator.
 - **Uninstall** an app: the app's own uninstaller starts, as it would from Settings → Apps. Disk Report notices

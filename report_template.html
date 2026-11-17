@@ -886,6 +886,8 @@ let WAITING = new Map();      // app group -> name of the program whose uninstal
 let PROTECTED = new Set();    // folders the app never deletes whole (Documents, AppData…)
 let LOCKED = [];              // folders in which the app deletes nothing at all: other accounts' folders
 let FREED = 0;                // bytes freed since this scan
+let APPLIED = new Set();      // logged actions already shown, by their time, so that none counts twice
+let DONE_SIG = "";            // what the log said last time it was read, to redraw only when that changes
 let PENDING = null;           // what the open dialog is about
 let BUSY = false;             // a dialog is working: Escape doesn't close it
 let SCAN = null;              // the running scan's status
@@ -924,19 +926,40 @@ function applyState(st) {
   if (st.theme) { document.documentElement.dataset.theme = st.theme; paintThemeButton(); }
   if (st.scan) load(st.scan);
   else { DATA = null; M = null; ITEMS = []; BY_ID = new Map(); }
-  // what was done since this scan: after load(), as the records name the scan's paths and apps
-  DONE = new Map(); REMOVED = new Map(); FREED = 0;
-  for (const r of st.done || []) applyRecord(r);
+  rebuildDone(st.done);   // after load(): the records name the scan's paths and apps
   if (DATA) {
     document.getElementById("bar-row").hidden = false;
     renderHeader(); render();
   } else renderEmpty();
   renderFreed(); renderFoot(); renderTools();
 }
+// what was done since this scan, from the action log
+function rebuildDone(done) {
+  DONE = new Map(); REMOVED = new Map(); FREED = 0; APPLIED = new Set();
+  for (const r of done || []) applyRecord(r);
+  DONE_SIG = doneSig(done);
+}
+const doneSig = done => JSON.stringify((done || []).map(r => [r.time, r.bin || null]));
 function applyRecord(r) {
+  if (r.time != null) {
+    if (APPLIED.has(r.time)) return;
+    APPLIED.add(r.time);
+  }
   if (r.kind === "delete") {
-    for (const p of r.paths || []) if (p.state !== "failed") DONE.set(p.path.toLowerCase(), { state: p.state });
-    for (const p of r.inner || []) DONE.set(p.path.toLowerCase(), { state: p.state });   // listed things that went too
+    // where a move to the Recycle Bin is now: restored (as if never moved), or gone for good with the bin emptied
+    const bin = r.bin || {}, back = [], gone = [];
+    for (const p of r.paths || []) {
+      if (p.state === "failed") continue;
+      const key = p.path.toLowerCase(), where = bin[p.path];
+      if (where === "restored") { back.push(key); continue; }
+      if (where === "gone") gone.push(key);
+      DONE.set(key, { state: where === "gone" ? (r.contents ? "emptied" : "deleted") : where === "mixed" ? "partial" : p.state });
+    }
+    const under = (key, list) => list.some(b => key === b || key.startsWith(b + "\\"));
+    for (const p of r.inner || []) {                     // listed things that went too
+      const key = p.path.toLowerCase();
+      if (!under(key, back)) DONE.set(key, { state: under(key, gone) ? "deleted" : p.state });
+    }
     for (const p of r.untouched || []) DONE.set(p.toLowerCase(), { state: "left" });     // and those left alone
     FREED += r.freed || 0;
   } else if (r.kind === "empty-bin" && r.ok) {
@@ -1497,6 +1520,22 @@ async function doRun() {
   if (r.ok) toast("Started in a terminal window. Scan again afterwards to see the space it freed.", "good");
   else if (!r.cancelled) toast(esc(r.error), "bad");
 }
+
+// A move to the Recycle Bin can be undone in Windows (Restore), or the bin emptied there: when the window is shown
+// again, and every 20 seconds while it's visible, the app reads what was done once more and redraws if it changed
+async function refreshDone() {
+  if (!APP || !DATA || BUSY || !window.pywebview || document.visibilityState !== "visible") return;
+  const drive = APP.drive, scanId = APP.scanId;
+  let done;
+  try { done = await api().done(drive); } catch (e) { return; }
+  if (!Array.isArray(done) || APP.drive !== drive || APP.scanId !== scanId || doneSig(done) === DONE_SIG) return;
+  APP.done = done;
+  rebuildDone(done);
+  render(); renderFreed();
+}
+window.addEventListener("focus", refreshDone);
+document.addEventListener("visibilitychange", refreshDone);
+setInterval(refreshDone, 20000);
 
 // The app calls this when its window is closed while something is still being deleted or uninstalled
 function closingSoon() {

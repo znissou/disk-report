@@ -15,6 +15,7 @@ import msvcrt
 import os
 import re
 import stat
+import struct
 import subprocess
 import time
 import winreg
@@ -319,6 +320,44 @@ def recycle_bin(drive):
     if shell32.SHQueryRecycleBinW(drive + "\\", ctypes.byref(info)) != 0:
         return None
     return {"size": info.i64Size, "items": info.i64NumItems}
+
+
+def recycle_bin_items(drive, root=None):
+    """What this account's part of a drive's Recycle Bin holds: {original path (normalized): (size, deleted at)}.
+    Read from the bin's own index files ($I…), which keep each item's original path. An index whose item ($R…) is
+    gone is skipped: Windows can leave one behind after a restore."""
+    root = root or drive + "\\$Recycle.Bin"
+    out = {}
+    try:
+        accounts = os.listdir(LONG + root)
+    except OSError:
+        return out
+    for account in accounts:
+        folder = root + "\\" + account
+        try:
+            names = os.listdir(LONG + folder)
+        except OSError:
+            continue                          # another account's part of the Recycle Bin
+        for name in names:
+            if not name.startswith("$I") or not os.path.lexists(LONG + folder + "\\$R" + name[2:]):
+                continue
+            try:
+                with open(LONG + folder + "\\" + name, "rb") as f:
+                    raw = f.read()
+                version, size, when = struct.unpack_from("<qqq", raw, 0)
+                if version == 2:              # Windows 10 and later: the path's length, then the path
+                    length = struct.unpack_from("<i", raw, 24)[0]
+                    original = raw[28:28 + 2 * length].decode("utf-16-le")
+                elif version == 1:            # Windows Vista to 8.1: a field of 260 characters
+                    original = raw[24:24 + 520].decode("utf-16-le")
+                else:
+                    continue
+            except (OSError, struct.error, UnicodeDecodeError):
+                continue
+            original = original.split("\0")[0]
+            if original:
+                out[norm(original)] = (size, when)
+    return out
 
 
 def empty_recycle_bin(drive, hwnd=None):

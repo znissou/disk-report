@@ -112,6 +112,8 @@ def save_scan(drive, data):
 
 
 def log_action(record):
+    """Append a record to the action log. Answers it as logged, with its time, which the page uses to tell records
+    apart (so one it already showed doesn't count twice when the log is read again)."""
     record = dict(record, time=time.time())
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
@@ -119,6 +121,7 @@ def log_action(record):
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except OSError:
         log_error("writing the action log")
+    return record
 
 
 def scan_started(meta):
@@ -154,6 +157,41 @@ def actions_for(scan_id, drive=None, since=None):
     except OSError:
         pass
     return out
+
+
+def bin_marks(records, drive):
+    """Where what Disk Report moved to the Recycle Bin is now, added to those records as "bin": {path: where}:
+    "in" (still in the Recycle Bin), "restored" (back where it was), "gone" (the Recycle Bin was emptied since), or
+    "mixed" (part of it back, part gone). Moves logged by Disk Report 2.0.x name no pieces: only those of whole files
+    and folders can be followed."""
+    moves = [r for r in records if r.get("kind") == "delete" and r.get("mode") == "trash"]
+    if not moves:
+        return records
+    held = actions.recycle_bin_items(drive)
+    for r in moves:
+        where = {}
+        moved = r.get("pieces")
+        for p in r.get("paths") or []:
+            path = p.get("path")
+            if not path or p.get("state") not in ("trashed", "partial"):
+                continue
+            if moved is not None:
+                key = actions.norm(path)
+                pieces = [q for q in moved if actions.inside(actions.norm(q), key)]
+            elif p["state"] == "trashed" and not r.get("contents"):
+                pieces = [path]
+            else:
+                continue
+            if not pieces:
+                continue
+            if any(actions.norm(q) in held for q in pieces):
+                where[path] = "in"
+            else:
+                back = [os.path.lexists(actions.LONG + q) for q in pieces]
+                where[path] = "restored" if all(back) else "gone" if not any(back) else "mixed"
+        if where:
+            r["bin"] = where
+    return records
 
 
 def installed_programs(drive, tokens):
@@ -383,14 +421,22 @@ class Api:
         return {
             "version": engine.VERSION, "drives": drives, "drive": drive, "usage": usage(drive),
             "scan": loaded.data if loaded else None, "scanId": loaded.id if loaded else None,
-            "done": actions_for(loaded.id, loaded.data["meta"]["drive"], scan_started(loaded.data["meta"]))
-            if loaded else [],
+            "done": self.done(drive) if loaded else [],
             "protected": sorted(loaded.guard.never) if loaded else [],
             "locked": sorted(loaded.guard.locked) if loaded else [],
             "programRoots": loaded.guard.program_roots if loaded else [],
             "commands": K.COMMANDS, "admin": engine.is_admin(), "theme": settings().get("theme"),
             "scanning": self.scan_status(),
         }
+
+    def done(self, drive):
+        """What was done since the drive's scan, with where each move to the Recycle Bin is now. The page asks again
+        when it's shown again, so a restore from the Recycle Bin (or the bin emptied in Windows) shows at once."""
+        loaded = self._get(engine.normalize_drive(drive))
+        if loaded is None:
+            return []
+        meta = loaded.data["meta"]
+        return bin_marks(actions_for(loaded.id, meta["drive"], scan_started(meta)), meta["drive"])
 
     def usage(self, drive):
         return usage(engine.normalize_drive(drive))
@@ -542,8 +588,7 @@ class Api:
                 record = self._delete_for_good(verdicts, contents, cluster, task)
             record.update(marks(verdicts, mode), kind="delete", mode=mode, contents=contents,
                           drive=loaded.data["meta"]["drive"], scan=loaded.id)
-            log_action(record)
-            return dict(record, ok=True, usage=usage(loaded.data["meta"]["drive"]))
+            return dict(log_action(record), ok=True, usage=usage(loaded.data["meta"]["drive"]))
 
         return {"ok": True, "task": self._tasks.start(work)}
 
@@ -554,9 +599,14 @@ class Api:
             pieces[p], k, n = parts_to_recycle(p, verdict["keep"], verdict["leave"], contents)
             kept, left = kept + k, left + n
         result = actions.recycle([q for found in pieces.values() for q in found], self._hwnd())
-        return {"freed": 0, "files": 0, "inUse": 0, "denied": 0, "kept": kept, "left": left,
-                "errors": [result["error"]] if result.get("error") else [], "cancelled": bool(result.get("cancelled")),
-                "paths": [{"path": p, "state": trash_state(p, pieces[p], contents)} for p, _ in verdicts]}
+        # what really went to the Recycle Bin, so the page can tell later whether it was restored from there
+        moved = [q for found in pieces.values() for q in found if not os.path.lexists(actions.LONG + q)]
+        record = {"freed": 0, "files": 0, "inUse": 0, "denied": 0, "kept": kept, "left": left,
+                  "errors": [result["error"]] if result.get("error") else [], "cancelled": bool(result.get("cancelled")),
+                  "paths": [{"path": p, "state": trash_state(p, pieces[p], contents)} for p, _ in verdicts]}
+        if len(moved) <= 500:            # a cache emptied of more pieces than that isn't followed
+            record["pieces"] = moved
+        return record
 
     @staticmethod
     def _delete_for_good(verdicts, contents, cluster, task):
@@ -648,8 +698,7 @@ class Api:
             record = dict(total, kind="delete", mode="forever", admin=True, contents=bool(contents), paths=states,
                           drive=loaded.data["meta"]["drive"], scan=loaded.id)
             record.update(marks(verdicts, "forever"))
-            log_action(record)
-            return dict(record, ok=True, usage=usage(loaded.data["meta"]["drive"]))
+            return dict(log_action(record), ok=True, usage=usage(loaded.data["meta"]["drive"]))
 
         return {"ok": True, "task": self._tasks.start(work)}
 
@@ -670,8 +719,8 @@ class Api:
 
         def work(task):
             result = actions.empty_recycle_bin(drive, self._hwnd())
-            log_action(dict(result, kind="empty-bin", drive=drive, scan=loaded.id if loaded else None))
-            return dict(result, drive=drive, usage=usage(drive))
+            logged = log_action(dict(result, kind="empty-bin", drive=drive, scan=loaded.id if loaded else None))
+            return dict(logged, usage=usage(drive))
 
         return {"ok": True, "task": self._tasks.start(work)}
 

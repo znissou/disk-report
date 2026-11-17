@@ -2,8 +2,8 @@
 
     py -m unittest discover tests
 
-Everything happens in temporary folders, except two read-only looks at the registry and the Recycle Bin. The app's
-own data folder (scans, action log) is a temporary one too. Moving to the Recycle Bin is imitated, except with
+Everything happens in temporary folders, except read-only looks at the registry and the Recycle Bin. The app's own
+data folder (scans, action log) is a temporary one too. Moving to the Recycle Bin is imitated, except with
 DISK_REPORT_TEST_RECYCLE=1, which also sends one tiny temporary file to the real Recycle Bin.
 """
 import hashlib
@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -823,6 +824,75 @@ class UninstallGone(unittest.TestCase):
         for group in ("Gone", "Store"):
             result = AppDeleting.finish(api, api.uninstall("C:", group, 0))
             self.assertEqual((result["state"], result["already"], result["error"]), ("removed", True, None), group)
+
+
+class RestoredFromTheBin(unittest.TestCase):
+    """The app notices what was restored from the Recycle Bin, or emptied from it, without a new scan."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="disk-report-test-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    @staticmethod
+    def index(folder, name, original, version=2, size=5000):
+        """An index file ($I…) as Windows writes it, version 2 (Windows 10+) or 1 (Vista to 8.1)."""
+        path = original + "\0"
+        if version == 2:
+            raw = struct.pack("<qqqi", 2, size, 133_000_000_000_000_000, len(path)) + path.encode("utf-16-le")
+        else:
+            raw = struct.pack("<qqq", 1, size, 133_000_000_000_000_000) + path.encode("utf-16-le").ljust(520, b"\0")
+        with open(os.path.join(folder, "$I" + name), "wb") as f:
+            f.write(raw)
+
+    def test_reads_the_recycle_bins_index(self):
+        mine = os.path.join(self.root, "S-1-5-21-test")
+        os.makedirs(mine)
+        self.index(mine, "ABC123.txt", "C:\\Users\\me\\Downloads\\old.txt")
+        write(os.path.join(mine, "$RABC123.txt"))
+        self.index(mine, "DEF456", "C:\\Old backups", version=1, size=7000)
+        os.makedirs(os.path.join(mine, "$RDEF456"))
+        self.index(mine, "GHI789", "C:\\Restored folder")       # its item went back: Windows left the index behind
+        items = actions.recycle_bin_items("C:", root=self.root)
+        self.assertEqual(sorted(items), ["c:\\old backups", "c:\\users\\me\\downloads\\old.txt"])
+        self.assertEqual(items["c:\\old backups"][0], 7000)
+
+    def test_where_each_move_is_now(self):
+        back, still, gone = (os.path.join(self.root, n) for n in ("back", "still", "gone"))
+        os.makedirs(back)
+        cache = os.path.join(self.root, "cache")
+        os.makedirs(os.path.join(cache, "restored piece"))
+        records = [
+            {"kind": "delete", "mode": "trash", "pieces": [back, still, gone], "paths": [
+                {"path": back, "state": "trashed"}, {"path": still, "state": "trashed"},
+                {"path": gone, "state": "trashed"}, {"path": os.path.join(self.root, "x"), "state": "failed"}]},
+            {"kind": "delete", "mode": "trash", "contents": True, "paths": [{"path": cache, "state": "trashed"}],
+             "pieces": [os.path.join(cache, "restored piece"), os.path.join(cache, "emptied piece")]},
+            {"kind": "delete", "mode": "trash", "contents": True, "paths": [{"path": cache, "state": "trashed"}]},
+            {"kind": "delete", "mode": "trash", "paths": [{"path": back, "state": "trashed"}]},   # logged by 2.0.x
+            {"kind": "delete", "mode": "forever", "paths": [{"path": gone, "state": "deleted"}]}]
+        real = actions.recycle_bin_items
+        actions.recycle_bin_items = lambda drive: {actions.norm(still): (5000, 0)}
+        self.addCleanup(setattr, actions, "recycle_bin_items", real)
+        marked = app.bin_marks(records, "C:")
+        self.assertEqual(marked[0]["bin"], {back: "restored", still: "in", gone: "gone"})
+        self.assertEqual(marked[1]["bin"], {cache: "mixed"})
+        self.assertNotIn("bin", marked[2])          # a cache emptied by 2.0.x: its pieces weren't logged
+        self.assertEqual(marked[3]["bin"], {back: "restored"})
+        self.assertNotIn("bin", marked[4])
+
+    def test_a_move_logs_what_went_and_when(self):
+        folder = os.path.join(self.root, "junk")
+        write(os.path.join(folder, "a.bin"))
+        real = actions.recycle
+        actions.recycle = lambda paths, hwnd=None: [shutil.rmtree(p) for p in paths] and {"ok": True}
+        self.addCleanup(setattr, actions, "recycle", real)
+        api = AppDeleting.api(self, [{"name": "junk", "cat": "other", "safety": "unknown", "paths": [folder]}])
+        result = AppDeleting.finish(api, api.delete("C:", [folder], "trash", False))
+        self.assertEqual(result["pieces"], [folder])
+        self.assertIsInstance(result["time"], float)    # the page tells records apart by it
+        done = api.done("C:")
+        self.assertEqual(done[-1]["time"], result["time"])
+        self.assertEqual(done[-1]["bin"], {folder: "gone"})   # the stand-in Recycle Bin above keeps nothing
 
 
 class RecycleBin(unittest.TestCase):
